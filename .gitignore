@@ -1,0 +1,24 @@
+# Ambiente / segredos
+.env
+*.env.local
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+
+# Django
+db.sqlite3
+staticfiles/
+media/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

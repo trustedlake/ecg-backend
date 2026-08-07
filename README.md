@@ -1,8 +1,9 @@
 # ecg-backend
 
 Backend Django + DRF do Projeto ECG (arquitetura em `../ARCHITECTURE.md`).
-Escopo desta fase: **esqueleto + schema + login** — sem endpoints de exame,
-sem invocação de lambdas, sem presigned URLs (fases seguintes).
+**Fase 2**: orquestração das 3 lambdas em 2 fases (Fase A: lambda-1 + lambda-2
+sem gate; Fase B: lambda-3 após aprovação) + presigned URLs do S3. Fase 1
+entregou: esqueleto, schema, login.
 
 ## Stack
 
@@ -15,6 +16,7 @@ sem invocação de lambdas, sem presigned URLs (fases seguintes).
 - Auth: `rest_framework.authtoken` (token opaco, header
   `Authorization: Token <token>`). Login é tela própria do frontend, **não** o
   Django Admin (o Admin existe só para o dono do sistema gerenciar médicos)
+- AWS: `boto3` — invocação síncrona das lambdas e presigned URLs
 
 ## Como rodar localmente
 
@@ -26,6 +28,61 @@ cp .env.example .env      # preencha DATABASE_URL
 python manage.py migrate
 python manage.py runserver
 ```
+
+## AWS (lambdas + S3)
+
+- Credenciais: **cadeia padrão do boto3** — para dev local:
+  `$env:AWS_PROFILE="trustedlake"` (ou `AWS_PROFILE=trustedlake` no shell)
+  com o perfil em `~/.aws/credentials`. Em produção isso vira IAM role da
+  instância (fase Terraform). `AWS_PROFILE` também pode ser posto no `.env`.
+- Buckets (overridáveis via env): `AWS_IMAGES_BUCKET`, `AWS_RESULTS_BUCKET`.
+- Nomes das lambdas (já prefixados com `ecg-lambdas-` — o terraform prefixa com
+  `app_name`, então NÃO usar os nomes do `main.tf` como estão): ver defaults em
+  `config/settings.py`; overridáveis via env.
+- `boto3` client lambda com `Config(read_timeout=330, connect_timeout=10)` —
+  lambda-2 tem timeout de 300s e o client precisa aguentar ler a resposta.
+- **Upload**: presigned PUT direto do frontend pro S3 (o Django nunca recebe os
+  bytes). A chamada ao S3 **não pode** carregar o header `Authorization` do
+  token da API — o S3 rejeita assinatura+header juntos (400 InvalidArgument).
+- Se `content_type` for enviado na criação da attempt, ele é **assinado** no
+  presigned PUT: o frontend DEVE mandar exatamente esse valor no header
+  `Content-Type`, senão 403. Sem `content_type`, qualquer conteúdo é aceito.
+- Presigned GETs são gerados **sob demanda** a cada resposta — nunca persistidos.
+
+## Endpoints (todos exigem `Authorization: Token ...`)
+
+| Método | Path | Descrição |
+|---|---|---|
+| POST | `/api/auth/login/` | email+senha → `{token, user}` (sem token) |
+| GET | `/api/exams/` | lista exames do médico (paginado, page_size=20) |
+| POST | `/api/exams/` | cria exame: `patient_id` OU paciente inline `{name, age, gender}` + `reason` |
+| GET | `/api/exams/<id>/` | detalhe + tentativas + report + URLs presigned on-demand |
+| POST | `/api/exams/<id>/attempts/` | cria attempt `{filename?, content_type?}` → `{attempt_id, upload_url, imagem_s3_key}` |
+| POST | `/api/exams/<id>/attempts/<aid>/process/` | Fase A (lambda-1+2) → overlays + fidelidade |
+| POST | `/api/exams/<id>/attempts/<aid>/aprovar/` | Fase B (lambda-3) → report + URLs das 3 imagens |
+| POST | `/api/exams/<id>/attempts/<aid>/rejeitar/` | marca rejeitado (reprocessar = nova attempt) |
+| POST | `/api/attempts/<aid>/feedback/` | `{issues, description}` |
+
+Transições de estado: `process` exige `criado`; `aprovar`/`rejeitar` exigem
+`aguardando_aprovacao` (senão 409). Erro em lambda → attempt/exam `erro` + 502.
+`sexo_feminino` não é enviado à lambda-3 (decisão fechada; ela aceita ausência).
+
+## Testes
+
+```bash
+# testes unitários usam SQLite (mockam invoke_lambda/presign — nunca tocam AWS)
+$env:DATABASE_URL="sqlite:///test.sqlite3"; python manage.py test exams accounts
+# smoke E2E com lambdas reais (sobe imagem de teste, Fase A, Fase B, limpa tudo)
+$env:AWS_PROFILE="trustedlake"; python manage.py runserver 127.0.0.1:8001
+$env:AWS_PROFILE="trustedlake"; python smoke_e2e.py
+```
+
+> **`smoke_e2e.py` faz chamadas REAIS na AWS** (invoca as 3 lambdas, sobe imagem
+> no S3, cria registros no Neon) — além de criar um usuário temporário no banco.
+> **NÃO rodar em CI nem em nenhum ambiente automatizado**: é validação manual
+> de ponta a ponta, executada só com a conta de dev (profile `trustedlake`).
+> Ele limpa tudo ao final, mas se o processo for morto no meio, pode sobrar
+> artefatos no S3/Neon.
 
 ## DATABASE_URL
 

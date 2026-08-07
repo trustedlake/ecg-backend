@@ -145,4 +145,36 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
     ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
 }
+
+# AWS — orquestração das lambdas + presigned URLs (Fase 2)
+# Local: boto3 usa a cadeia padrão de credenciais; para dev, exportar
+# AWS_PROFILE=trustedlake (perfil com acesso à conta 785236377332). Em
+# produção isso vira IAM role da instância (fase Terraform).
+AWS_REGION = env("AWS_REGION", default="sa-east-1")
+AWS_PROFILE_NAME = env("AWS_PROFILE", default=None)
+AWS_IMAGES_BUCKET = env(
+    "AWS_IMAGES_BUCKET",
+    default="ecg-lambdas-images-785236377332-sa-east-1",
+)
+AWS_RESULTS_BUCKET = env(
+    "AWS_RESULTS_BUCKET",
+    default="ecg-lambdas-results-785236377332-sa-east-1",
+)
+# Nomes reais deployados (terraform prefixa com app_name "ecg-lambdas").
+AWS_LAMBDA_GRIDLINE_TRACE = env(
+    "AWS_LAMBDA_GRIDLINE_TRACE",
+    default="ecg-lambdas-lambda-1-gridline-and-trace",
+)
+AWS_LAMBDA_SIGNAL_EXTRACTION = env(
+    "AWS_LAMBDA_SIGNAL_EXTRACTION",
+    default="ecg-lambdas-lambda-2-signal-extraction",
+)
+AWS_LAMBDA_DIAGNOSIS = env(
+    "AWS_LAMBDA_DIAGNOSIS",
+    default="ecg-lambdas-lambda-3-diagnosis",
+)
+PRESIGN_URL_EXPIRES = env.int("PRESIGN_URL_EXPIRES", default=3600)

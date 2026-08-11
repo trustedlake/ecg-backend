@@ -31,6 +31,43 @@ python manage.py runserver
 
 ## AWS (lambdas + S3)
 
+### Setup da EC2 de produção (Terraform em `infra/terraform/`)
+
+A instância EC2 é provisionada por Terraform (state em
+`ecg-lambdas-terraform-state`, key `ecg-backend/terraform.tfstate`, sem tocar o
+state do ecg-lambdas). Passos na ordem:
+
+```bash
+# 1. (uma vez) Gera o par de chaves SSH localmente — o Terraform NUNCA lida com
+#    a privada (senão ela iria em texto claro pro tfstate). Roda só se não
+#    existir; idempotente.
+./infra/keys/generate-key.sh        # Windows: rodar via git-bash/WSL
+
+# 2. (uma vez) Preenche os segredos no SSM (SecureString). Placeholders criados
+#    pelo apply depois são sobrescritos aqui — nada de segredo no terraform/git:
+#    aws ssm put-parameter --name /ecg-backend/DATABASE_URL --type SecureString --value "postgresql://..." --overwrite
+#    aws ssm put-parameter --name /ecg-backend/DJANGO_SECRET_KEY --type SecureString --value "..." --overwrite
+
+# 3. Plan/apply da infra. SSH fica na instância (porta 22) LIBERADO SÓ pro seu
+#    IP — a variável ssh_allowed_cidr não tem default de propósito:
+cd infra/terraform
+terraform apply -var="ssh_allowed_cidr=<SEU_IP>/32"   # ex.: 203.0.113.42/32
+```
+
+Depois do apply, `terraform output instance_public_ip` mostra o IP público; o
+deploy da aplicação é manual (espírito do deploy.md do ecg-lambdas):
+
+```bash
+./infra/deploy.sh <IP_PUBLICO>
+```
+
+O `user_data` do boot já cria o `.env` (DEBUG=False, ALLOWED_HOSTS=IP público,
+DATABASE_URL/DJANGO_SECRET_KEY lidas do SSM) e registra o serviço systemd
+`ecg-backend` (Gunicorn 0.0.0.0:8000, `--timeout 360` — acima dos 300s das
+lambdas da Fase B; sem nginx/ALB, decisão fechada).
+
+## Credenciais dev
+
 - Credenciais: **cadeia padrão do boto3** — para dev local:
   `$env:AWS_PROFILE="trustedlake"` (ou `AWS_PROFILE=trustedlake` no shell)
   com o perfil em `~/.aws/credentials`. Em produção isso vira IAM role da

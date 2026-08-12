@@ -20,7 +20,7 @@ from django.conf import settings  # noqa: E402
 from django.contrib.auth import get_user_model  # noqa: E402
 from rest_framework.authtoken.models import Token  # noqa: E402
 
-BASE = "http://127.0.0.1:8001"
+BASE = os.environ.get("SMOKE_BASE_URL", "http://127.0.0.1:8001")
 EMAIL = "smoke-e2e@test.local"
 PASS = "smoke-e2e-senha-1"
 SESSION = requests.Session()

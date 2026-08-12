@@ -203,3 +203,50 @@ resource "aws_instance" "ecg_backend" {
     Name = local.app_name
   }
 }
+
+# ---------- Elastic IP (IP público fixo) ----------
+resource "aws_eip" "ecg_backend" {
+  instance = aws_instance.ecg_backend.id
+  domain   = "vpc"
+}
+
+# ---------- CloudFront (HTTPS na frente da EC2) ----------
+resource "aws_cloudfront_distribution" "ecg_backend" {
+  enabled = true
+  comment = "HTTPS proxy para ecg-backend (EC2 sem TLS nativo)"
+  price_class = "PriceClass_100"
+
+  origin {
+    domain_name = aws_eip.ecg_backend.public_dns
+    origin_id   = "ecg-backend-origin"
+
+    custom_origin_config {
+      http_port                = 8000
+      https_port               = 443
+      origin_protocol_policy   = "http-only"
+      origin_ssl_protocols     = ["TLSv1.2"]
+      origin_read_timeout      = 60
+      origin_keepalive_timeout = 60
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods          = ["GET", "HEAD"]
+    target_origin_id        = "ecg-backend-origin"
+    viewer_protocol_policy  = "redirect-to-https"
+
+    cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # AWS managed: CachingDisabled
+    origin_request_policy_id = "216adef6-5c7f-47e4-b989-5492eafa07d3" # AWS managed: AllViewer
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}

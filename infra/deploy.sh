@@ -45,5 +45,10 @@ echo "==> 4/5 Reiniciando serviço"
 
 echo "==> 5/5 Health check"
 sleep 3
-curl -sf -o /dev/null -X POST http://${INSTANCE_IP}:8000/api/auth/login/ -H 'Content-Type: application/json' -d '{}' \
-  && echo "API no ar: http://${INSTANCE_IP}:8000" || { echo "Falha no health check — confira: ssh -i ${KEY} ${REMOTE_USER}@${INSTANCE_IP} 'sudo journalctl -u ecg-backend -n 50'"; exit 1; }
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://${INSTANCE_IP}:8000/api/auth/login/ -H 'Content-Type: application/json' -d '{}')
+if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "400" ]]; then
+  echo "API no ar: http://${INSTANCE_IP}:8000 (HTTP $HTTP_CODE)"
+else
+  echo "Falha no health check (HTTP ${HTTP_CODE:-sem resposta}) — confira: ssh -i ${KEY} ${REMOTE_USER}@${INSTANCE_IP} 'sudo journalctl -u ecg-backend -n 50'"
+  exit 1
+fi

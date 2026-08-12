@@ -17,3 +17,13 @@ output "private_key_path" {
   description = "Caminho do PEM local (vazio se reutilizou um key pair existente)."
   value       = var.key_name == "" ? "${path.module}/../keys/${local.app_name}.pem" : ""
 }
+
+output "elastic_ip" {
+  description = "IP público fixo da instância (Elastic IP)."
+  value       = aws_eip.ecg_backend.public_ip
+}
+
+output "cloudfront_domain" {
+  description = "Domínio HTTPS do CloudFront na frente do backend."
+  value       = aws_cloudfront_distribution.ecg_backend.domain_name
+}

@@ -58,10 +58,10 @@ LAMBDA3_OUT = {
 class BaseAPITestCase(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(
-            email="medico@test.local", password="senha-123", name="MÃ©dica Teste", crm="CRM-1"
+            username="medico-teste", email="medico@test.local", password="senha-123", name="MÃ©dica Teste", crm="CRM-1"
         )
         self.other = User.objects.create_user(
-            email="outro@test.local", password="senha-123", name="Outro MÃ©dico", crm="CRM-2"
+            username="outro-medico", email="outro@test.local", password="senha-123", name="Outro MÃ©dico", crm="CRM-2"
         )
         self.client.force_authenticate(user=self.user)
 

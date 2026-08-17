@@ -21,6 +21,7 @@ from django.contrib.auth import get_user_model  # noqa: E402
 from rest_framework.authtoken.models import Token  # noqa: E402
 
 BASE = os.environ.get("SMOKE_BASE_URL", "http://127.0.0.1:8001")
+USERNAME = "smoke-e2e"
 EMAIL = "smoke-e2e@test.local"
 PASS = "smoke-e2e-senha-1"
 SESSION = requests.Session()
@@ -49,14 +50,14 @@ def cleanup_keys(keys):
 
 def main():
     # usu??rio tempor??rio
-    user = User.objects.create_user(email=EMAIL, password=PASS, name="Smoke E2E", crm="CRM-E2E")
+    user = User.objects.create_user(username=USERNAME, email=EMAIL, password=PASS, name="Smoke E2E", crm="CRM-E2E")
     token = Token.objects.create(user=user)
     SESSION.headers["Authorization"] = f"Token {token.key}"
 
     to_delete_keys = []
     try:
         # 1. login real
-        r = api("POST", "/api/auth/login/", json={"email": EMAIL, "password": PASS})
+        r = api("POST", "/api/auth/login/", json={"username": USERNAME, "password": PASS})
         assert r.status_code == 200, r.text
 
         # 2. exame com paciente inline

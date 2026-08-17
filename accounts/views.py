@@ -1,17 +1,18 @@
-import django.contrib.auth
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .models import User
+
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    username = serializers.CharField()
     password = serializers.CharField(trim_whitespace=False)
 
 
 class LoginView(APIView):
-    """POST /api/auth/login/ — email + senha -> {token, user}."""
+    """POST /api/auth/login/ — username + senha -> {token, user}."""
 
     authentication_classes = []
     permission_classes = []
@@ -20,17 +21,18 @@ class LoginView(APIView):
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
-        email = serializer.validated_data["email"]
+        username = serializer.validated_data["username"]
         password = serializer.validated_data["password"]
 
-        # USERNAME_FIELD='email': authenticate recebe username como email.
-        user = django.contrib.auth.authenticate(
-            request, username=email, password=password
-        )
-        if user is None:
-            raise serializers.ValidationError(
-                {"detail": "Email ou senha inválidos."}
-            )
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            raise serializers.ValidationError({"detail": "Usuário inválido."})
+
+        if not user.check_password(password):
+            raise serializers.ValidationError({"detail": "Senha inválida."})
+        if not user.is_active:
+            raise serializers.ValidationError({"detail": "Usuário inválido."})
 
         token, _ = Token.objects.get_or_create(user=user)
         return Response(
@@ -39,8 +41,10 @@ class LoginView(APIView):
                 "user": {
                     "id": str(user.id),
                     "name": user.name,
+                    "username": user.username,
                     "email": user.email,
                     "crm": user.crm,
+                    "is_admin": user.is_staff,
                 },
             }
         )

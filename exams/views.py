@@ -2,6 +2,7 @@ import logging
 import uuid
 
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import pagination, status
 from rest_framework.exceptions import APIException
 from rest_framework.permissions import IsAuthenticated
@@ -98,7 +99,8 @@ class AttemptCreateView(APIView):
         serializer.is_valid(raise_exception=True)
 
         attempt_id = uuid.uuid4()
-        key = f"{exam.id}/{attempt_id}/original.{serializer.validated_data['_ext']}"
+        timestamp = timezone.now().strftime("%Y-%m-%dT%H-%M-%S")
+        key = f"{request.user.username}/{timestamp}/{exam.id}/{attempt_id}/original.{serializer.validated_data['_ext']}"
         attempt = ExamAttempt.objects.create(
             id=attempt_id,
             exam=exam,

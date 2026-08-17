@@ -26,7 +26,7 @@ python -m venv .venv
 pip install -r requirements.txt
 cp .env.example .env      # preencha DATABASE_URL
 python manage.py migrate
-python manage.py runserver
+python manage.py runserver 127.0.0.1:52494
 ```
 
 ## AWS (lambdas + S3)

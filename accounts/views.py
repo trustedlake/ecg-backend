@@ -25,7 +25,7 @@ class LoginView(APIView):
         password = serializer.validated_data["password"]
 
         try:
-            user = User.objects.get(username=username)
+            user = User.objects.get(username__iexact=username)
         except User.DoesNotExist:
             raise serializers.ValidationError({"detail": "Usuário inválido."})
 

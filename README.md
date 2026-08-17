@@ -54,6 +54,14 @@ cd infra/terraform
 terraform apply -var="ssh_allowed_cidr=<SEU_IP>/32"   # ex.: 203.0.113.42/32
 ```
 
+> **A chave real usada em prod não é a gerada por `generate-key.sh`.** O par
+> registrado na instância (`ecg-backend-deploy`) hoje só tem a privada
+> guardada em `C:\Users\User\Documents\Chris\repos\pem\processing-data.pem`
+> (fora deste repo, pasta `pem/` compartilhada). Pra rodar `infra/deploy.sh`,
+> copie esse arquivo pra `infra/keys/ecg-backend.pem` antes (path é
+> gitignored). Se você não tem acesso a essa pasta, peça a chave antes de
+> tentar deployar.
+
 Depois do apply, `terraform output instance_public_ip` mostra o IP público; o
 deploy da aplicação é manual (espírito do deploy.md do ecg-lambdas):
 

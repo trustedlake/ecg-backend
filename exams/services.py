@@ -55,6 +55,11 @@ def _lambda_client():
     )
 
 
+def _s3_client():
+    """Client S3 forçado a SigV4 para presigned URLs (SigV2 deprecated by AWS)."""
+    return _session().client("s3", config=Config(signature_version="s3v4"))
+
+
 def invoke_lambda(function_name, payload):
     """Invoca uma lambda sincronamente (RequestResponse) e devolve o dict.
 
@@ -88,14 +93,14 @@ def presign_put_url(bucket, key, expires_in, content_type=None):
     params = {"Bucket": bucket, "Key": key}
     if content_type:
         params["ContentType"] = content_type
-    return _session().client("s3").generate_presigned_url(
+    return _s3_client().generate_presigned_url(
         "put_object", Params=params, ExpiresIn=expires_in
     )
 
 
 def presign_get_url(bucket, key, expires_in):
     """Presigned GET sob demanda — URLs nunca são persistidas no banco."""
-    return _session().client("s3").generate_presigned_url(
+    return _s3_client().generate_presigned_url(
         "get_object",
         Params={"Bucket": bucket, "Key": key},
         ExpiresIn=expires_in,

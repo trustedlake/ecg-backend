@@ -23,6 +23,14 @@ infra/terraform/*.tfstate
 infra/terraform/*.tfstate.*
 infra/terraform/crash.log
 
+# Terraform (infra-oracle/)
+infra-oracle/.terraform/
+infra-oracle/*.tfstate
+infra-oracle/*.tfstate.backup
+infra-oracle/.terraform.lock.hcl
+infra-oracle/tfplan*
+infra-oracle/terraform.tfvars
+
 # Chave privada/pública geradas localmente (nunca versionar) — mas versionar o script que as gera
 infra/keys/*
 !infra/keys/generate-key.sh

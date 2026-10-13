@@ -4,6 +4,7 @@ from .views import (
     AttemptApproveView,
     AttemptCreateView,
     AttemptProcessView,
+    AttemptRefineView,
     AttemptRejectView,
     ExamDetailView,
     ExamListCreateView,
@@ -23,6 +24,7 @@ urlpatterns = [
         AttemptProcessView.as_view(),
         name="attempt-process",
     ),
+    path("exams/<uuid:exam_id>/attempts/<uuid:attempt_id>/refine/", AttemptRefineView.as_view(), name="attempt-refine"),
     path(
         "exams/<uuid:exam_id>/attempts/<uuid:attempt_id>/aprovar/",
         AttemptApproveView.as_view(),

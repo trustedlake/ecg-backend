@@ -1,4 +1,4 @@
-﻿"""Testes da API de exames (lÃ³gica de orquestraÃ§Ã£o + isolamento por mÃ©dico).
+"""Testes da API de exames (lÃ³gica de orquestraÃ§Ã£o + isolamento por mÃ©dico).
 
 As lambdas sÃ£o MOCKADAS em `exams.services.invoke_lambda` e as URLs presigned
 em `exams.services.presign_get_url/presign_put_url` â€” rodar contra a AWS de
@@ -17,42 +17,48 @@ from .models import Exam, ExamAttempt, ExamStatus, Feedback, Patient, Report
 
 User = get_user_model()
 
-LAMBDA1_OUT = {
-    "exame_id": "00000000-0000-0000-0000-000000000001",
-    "image_type": "grayscale",
-    "image_type_motivo": None,
-    "ecg_colors": {"trace": [[1, 2], [3, 4]]},
-    "mascara_traco_s3_key": "results/xxx/trace_mask.npz",
-    "imagem_original_s3_key": "exam/attempt/original.png",
-    "calibracao": {"mm_per_mv": 10.0, "mm_per_second": 25.0},
+LAMBDA_ANALYZE_OUT = {
+    "status": "CONSISTENCY_PASS", "warnings": [],
+    "leads": [{"name":"I"},{"name":"II"}],
+    "grid": {"valid":True},
+    "artifacts": {
+        "result":"ecg-analyser/{A}/initial/result.json",
+        "signals":"ecg-analyser/{A}/initial/signals.npz",
+        "trace_masks":"ecg-analyser/{A}/initial/trace_masks.npz",
+        "visao_geral":"ecg-analyser/{A}/initial/visao_geral.png",
+        "working_image":"ecg-analyser/{A}/initial/working_image.png",
+    },
 }
 
-LAMBDA2_OUT = {
-    "exame_id": "00000000-0000-0000-0000-000000000001",
-    "ecg_layout": "3x4+1",
-    "lead_labels": ["I", "II"],
-    "rhythm_index": 1,
-    "paineis": [{"lead": "I", "y0": 1, "y1": 10, "x0": 1, "x1": 10}],
-    "ecg_pintado_traco_s3_key": "results/exam/overlay_trace.png",
-    "ecg_pintado_sinal_s3_key": "results/exam/overlay_signal.png",
-    "sinais": [{"lead": "I", "amostras": [0.0, 1.0]}],
-    "fidelidade_por_derivacao": {"I": {"ok": True, "flags": []}},
-    "fidelidade": "bom",
-    "calibracao": {"mm_per_mv": 10.0},
+LAMBDA_REJECTED_OUT = {
+    "status":"REJECTED_LOW_TRACE_GRID_CONTRAST", "warnings":["low contrast"],
+    "leads":[], "artifacts":{"result":"ecg-analyser/{A}/initial/result.json"},
 }
 
-LAMBDA3_OUT = {
-    "exame_id": "00000000-0000-0000-0000-000000000001",
-    "ritmo": {"fc_bpm": 72, "ritmo": "sinusal"},
-    "eixo_graus": 45.0,
-    "sokolow_mm": 12.5,
-    "derivacoes": [{"lead": "I"}],
-    "indicadores": [{"indicador": "P", "valor": 1}],
-    "achados": [],
-    "conclusao": "ECG sem alteraÃ§Ãµes detectadas (FC 72 bpm).",
-    "confiabilidade": "bom",
-    "versao_codigo": "0.1.0",
+LAMBDA_REFINE_OUT = {
+    "status":"MANUAL_REVIEW_REQUIRED", "warnings":["MANUAL_CORRECTION_UNVERIFIED"],
+    "manual_correction":{"lead":"II","changed_columns":2},
+    "artifacts":{
+        "result":"ecg-analyser/{A}/r2/result.json",
+        "signals":"ecg-analyser/{A}/r2/signals.npz",
+        "trace_masks":"ecg-analyser/{A}/r2/trace_masks.npz",
+        "working_image":"ecg-analyser/{A}/r2/working_image.png",
+        "correction_preview":"ecg-analyser/{A}/r2/correction_preview.png",
+    },
 }
+
+
+def lambda_fake(**outputs):
+    """Fake invoke_lambda: answers per operation, with keys under the real attempt id."""
+    import json
+    def fake(function_name, payload):
+        out = outputs[payload["operation"]]
+        return json.loads(json.dumps(out).replace("{A}", payload["attempt_id"]))
+    return fake
+
+
+def real_keys(artifacts, attempt):
+    return {k: v.replace("{A}", str(attempt.id)) for k, v in artifacts.items()}
 
 
 class BaseAPITestCase(APITestCase):
@@ -70,6 +76,7 @@ class BaseAPITestCase(APITestCase):
         return Exam.objects.create(patient=p, doctor=doctor or self.user, reason="rotina")
 
     def _attempt(self, exam, status_=ExamStatus.CRIADO, **kwargs):
+        kwargs.setdefault("calibracao", {"speed_mm_s":25,"gain_mm_mv":10})
         return ExamAttempt.objects.create(
             exam=exam, status=status_,
             imagem_s3_key=f"{exam.id}/a/original.png", **kwargs,
@@ -130,7 +137,7 @@ class AttemptCreateTest(BaseAPITestCase):
         exam = self._exame()
         resp = self.client.post(
             reverse("attempt-create", args=[exam.id]),
-            {"filename": "ecg.png"},
+            {"filename": "ecg.png", "content_type":"image/png", "speed_mm_s":25, "gain_mm_mv":10},
             format="json",
         )
         self.assertEqual(resp.status_code, 201)
@@ -139,6 +146,7 @@ class AttemptCreateTest(BaseAPITestCase):
         attempt = ExamAttempt.objects.get()
         self.assertTrue(attempt.imagem_s3_key.endswith("original.png"))
         self.assertEqual(attempt.status, ExamStatus.CRIADO)
+        self.assertEqual(attempt.calibracao["gain_mm_mv"], 10)
         self.assertTrue(resp.data["imagem_s3_key"].endswith("original.png"))
 
     @mock.patch("exams.services.presign_put_url", return_value="https://presigned/PUT")
@@ -153,83 +161,129 @@ class AttemptFlowTest(BaseAPITestCase):
         super().setUp()
         self.exam = self._exame()
         self.attempt = self._attempt(self.exam)
-        self._create_url = reverse("attempt-create", args=[self.exam.id])
         self._process_url = reverse("attempt-process", args=[self.exam.id, self.attempt.id])
-        self._aprovar_url = reverse("attempt-aprovar", args=[self.exam.id, self.attempt.id])
+        self._refine_url = reverse("attempt-refine", args=[self.exam.id, self.attempt.id])
+        self._approve_url = reverse("attempt-aprovar", args=[self.exam.id, self.attempt.id])
 
-    @mock.patch("exams.services.presign_get_url",
-                side_effect=lambda bucket, key, *a: f"http://get/{key}")
-    @mock.patch("exams.services.invoke_lambda", side_effect=[LAMBDA1_OUT, LAMBDA2_OUT])
-    def test_phase_a_maps_fields(self, _l, _g):
-        resp = self.client.post(self._process_url)
-        self.assertEqual(resp.status_code, 200)
-
+    @mock.patch("exams.services.presign_get_url", return_value="https://signed")
+    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(analyze=LAMBDA_ANALYZE_OUT))
+    def test_one_lambda_analyze_stores_artifacts(self, invoke, signed):
+        response=self.client.post(self._process_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(invoke.call_count, 1)
+        self.assertEqual(invoke.call_args.args[1]["operation"], "analyze")
+        self.assertEqual(invoke.call_args.args[1]["calibration"]["speed_mm_s"], 25)
         self.attempt.refresh_from_db()
-        self.exam.refresh_from_db()
         self.assertEqual(self.attempt.status, ExamStatus.AGUARDANDO_APROVACAO)
-        self.assertEqual(self.exam.status, ExamStatus.AGUARDANDO_APROVACAO)
-        self.assertEqual(self.attempt.image_type, "grayscale")
-        self.assertEqual(self.attempt.mascara_s3_key, LAMBDA1_OUT["mascara_traco_s3_key"])
-        self.assertEqual(self.attempt.overlay_trace_s3_key, "results/exam/overlay_trace.png")
-        self.assertEqual(self.attempt.overlay_signal_s3_key, "results/exam/overlay_signal.png")
-        self.assertEqual(self.attempt.sinais, LAMBDA2_OUT["sinais"])
-        self.assertEqual(self.attempt.fidelidade, "bom")
-        self.assertEqual(self.attempt.rhythm_index, 1)
-        self.assertEqual(resp.data["fidelidade"], "bom")
-        self.assertEqual(resp.data["status"], ExamStatus.AGUARDANDO_APROVACAO)
-        self.assertTrue(resp.data["overlay_trace_url"].startswith("http"))
+        self.assertEqual(self.attempt.sinais["analyser_status"], "CONSISTENCY_PASS")
+        self.assertEqual(self.attempt.mascara_s3_key, real_keys(LAMBDA_ANALYZE_OUT["artifacts"], self.attempt)["trace_masks"])
+
+    @mock.patch("exams.services.presign_get_url", return_value="https://signed")
+    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(analyze=LAMBDA_REJECTED_OUT))
+    def test_rejection_does_not_export_signals(self, invoke, signed):
+        response=self.client.post(self._process_url)
+        self.assertEqual(response.status_code, 200)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status, ExamStatus.REJEITADO)
+        self.assertIsNone(self.attempt.sinais["signals_s3_key"])
+        self.assertEqual(self.client.post(self._approve_url).status_code, 409)
+        refine_body = {"coordinate_system": "normalized_image_v1", "lead": "II", "strokes": [
+            {"lead": "II", "mode": "include", "points": [{"x": 0.2, "y": 0.2}]}]}
+        self.assertEqual(self.client.post(self._refine_url, refine_body, format="json").status_code, 409)
+
+    @mock.patch("exams.services.presign_get_url", return_value="https://signed")
+    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(analyze=LAMBDA_ANALYZE_OUT))
+    def test_get_state_does_not_invoke_lambda_twice(self, invoke, signed):
+        self.client.post(self._process_url)
+        response=self.client.get(self._process_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"],ExamStatus.AGUARDANDO_APROVACAO)
+        self.assertEqual(response.data["working_image_url"],"https://signed")
+        self.assertEqual(invoke.call_count,1)
+
+    @mock.patch("exams.services.presign_get_url", return_value="https://signed")
+    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(analyze=LAMBDA_ANALYZE_OUT, refine=LAMBDA_REFINE_OUT))
+    def test_manual_paint_saves_new_version(self, invoke, signed):
+        self.assertEqual(self.client.post(self._process_url).status_code,200)
+        response=self.client.post(self._refine_url,{
+            "coordinate_system":"normalized_image_v1", "lead":"II", "strokes":[
+                {"lead":"II","mode":"exclude","points":[{"x":0.4,"y":0.5}]}]},format="json")
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.data['status'],'MANUAL_REVIEW_REQUIRED')
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.overlay_trace_s3_key, real_keys(LAMBDA_REFINE_OUT['artifacts'], self.attempt)['correction_preview'])
+        self.assertEqual(len(self.attempt.sinais['correction_history']),1)
+        self.assertEqual(invoke.call_count,2)
 
     @mock.patch("exams.services.invoke_lambda", side_effect=Exception("boom"))
-    def test_process_marks_erro_on_failure(self, _m):
-        resp = self.client.post(self._process_url)
-        self.assertEqual(resp.status_code, 502)
+    def test_upstream_failure_marks_error(self, invoke):
+        response=self.client.post(self._process_url)
+        self.assertEqual(response.status_code,502)
         self.attempt.refresh_from_db()
-        self.exam.refresh_from_db()
-        self.assertEqual(self.attempt.status, ExamStatus.ERRO)
-        self.assertEqual(self.exam.status, ExamStatus.ERRO)
+        self.assertEqual(self.attempt.status,ExamStatus.ERRO)
 
-    def test_process_wrong_state_conflict(self):
-        self.attempt.status = ExamStatus.REJEITADO
+    def test_reprocess_wrong_state_returns_409(self):
+        self.attempt.status=ExamStatus.REJEITADO
         self.attempt.save()
-        resp = self.client.post(self._process_url)
-        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(self.client.post(self._process_url).status_code,409)
 
-    @mock.patch("exams.services.presign_get_url",
-                    side_effect=lambda bucket, key, *a: f"http://get/{key}")
-    @mock.patch("exams.services.invoke_lambda", return_value=LAMBDA3_OUT)
-    def test_approve_creates_report_and_concludes(self, _mock, _g):
-        self.attempt.status = ExamStatus.AGUARDANDO_APROVACAO
-        self.attempt.sinais = LAMBDA2_OUT["sinais"]
-        self.attempt.lead_labels = ["I", "II"]
-        self.attempt.calibracao = {}
-        self.attempt.fidelidade = "bom"
+    @mock.patch("exams.services.presign_get_url", return_value="https://signed")
+    @mock.patch("exams.services.invoke_lambda")
+    def test_approval_only_confirms_extraction_without_diagnosis(self, invoke, signed):
+        self.attempt.status=ExamStatus.AGUARDANDO_APROVACAO
+        self.attempt.sinais={"analyser_status":"CONSISTENCY_PASS"}
+        self.attempt.fidelidade="bom"
         self.attempt.save()
-
-        resp = self.client.post(self._aprovar_url)
-        self.assertEqual(resp.status_code, 200)
-        report = Report.objects.get(attempt=self.attempt)
-        self.assertEqual(report.eixo_graus, 45.0)
-        self.assertEqual(report.confiabilidade, "bom")
-        self.assertEqual(report.versao_codigo, "0.1.0")
-
+        response=self.client.post(self._approve_url)
+        self.assertEqual(response.status_code,200)
         self.attempt.refresh_from_db()
-        self.exam.refresh_from_db()
-        self.assertEqual(self.attempt.status, ExamStatus.CONCLUIDO)
-        self.assertEqual(self.exam.status, ExamStatus.CONCLUIDO)
-        self.assertEqual(resp.data["ritmo"]["fc_bpm"], 72)
+        self.assertEqual(self.attempt.status,ExamStatus.CONCLUIDO)
+        report=Report.objects.get(attempt=self.attempt)
+        self.assertIsNone(report.conclusao)
+        self.assertEqual(report.versao_codigo,"ecg-analyser-extraction-only")
+        invoke.assert_not_called()
 
-    def test_approve_wrong_state(self):
-        self.attempt.status = ExamStatus.CRIADO
+    def test_foreign_user_cannot_refine_another_doctors_attempt(self):
+        self.attempt.status=ExamStatus.AGUARDANDO_APROVACAO
         self.attempt.save()
-        resp = self.client.post(self._aprovar_url)
-        self.assertEqual(resp.status_code, 409)
+        self.client.force_authenticate(user=self.other)
+        data={"coordinate_system":"normalized_image_v1", "lead":"II", "strokes":[
+            {"lead":"II","mode":"exclude","points":[{"x":0.2,"y":0.2}]}]}
+        response=self.client.post(self._refine_url,data,format="json")
+        self.assertEqual(response.status_code,404)
 
-    def test_reject(self):
-        self.attempt.status = ExamStatus.AGUARDANDO_APROVACAO
+    @mock.patch("exams.services.run_refine")
+    def test_busy_refine_blocked_before_second_lambda(self, worker):
+        self.attempt.status=ExamStatus.FASE_A_PROCESSANDO
         self.attempt.save()
-        resp = self.client.post(reverse("attempt-rejeitar", args=[self.exam.id, self.attempt.id]))
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["status"], ExamStatus.REJEITADO)
+        data={"coordinate_system":"normalized_image_v1", "lead":"II", "strokes":[
+            {"lead":"II","mode":"include","points":[{"x":0.2,"y":0.2}]}]}
+        response=self.client.post(self._refine_url,data,format="json")
+        self.assertEqual(response.status_code,409)
+        worker.assert_not_called()
+
+    @mock.patch("exams.services.run_refine")
+    def test_refine_failure_restores_review_status(self, worker):
+        from exams.services import UpstreamError
+        self.attempt.status=ExamStatus.AGUARDANDO_APROVACAO
+        self.attempt.save()
+        worker.side_effect=UpstreamError("fake network failure")
+        data={"coordinate_system":"normalized_image_v1", "lead":"II", "strokes":[
+            {"lead":"II","mode":"include","points":[{"x":0.2,"y":0.2}]}]}
+        response=self.client.post(self._refine_url,data,format="json")
+        self.assertEqual(response.status_code,502)
+        self.attempt.refresh_from_db()
+        self.assertEqual(self.attempt.status,ExamStatus.AGUARDANDO_APROVACAO)
+
+    def test_approval_wrong_state_returns_409(self):
+        self.assertEqual(self.client.post(self._approve_url).status_code,409)
+
+    def test_reject_waiting(self):
+        self.attempt.status=ExamStatus.AGUARDANDO_APROVACAO
+        self.attempt.save()
+        response=self.client.post(reverse("attempt-rejeitar",args=[self.exam.id,self.attempt.id]))
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.data["status"],ExamStatus.REJEITADO)
 
 
 class FeedbackTest(BaseAPITestCase):

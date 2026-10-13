@@ -33,13 +33,17 @@ SECRET_KEY = env(
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env("DEBUG")
+# Reject the development fallback secret in production.
+if not DEBUG and not env("DJANGO_SECRET_KEY", default="").strip():
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("Defina DJANGO_SECRET_KEY em produção")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
-# CORS — origens permitidas (dev local: Vite). Sempre via env, com default pro dev.
+# CORS — origens Expo Web explícitas; produção deve usar domínio HTTPS autorizado.
 CORS_ALLOWED_ORIGINS = env.list(
     "CORS_ALLOWED_ORIGINS",
-    default=["http://localhost:47535"],
+    default=["http://localhost:8081", "http://127.0.0.1:8081"],
 )
 
 
@@ -173,17 +177,9 @@ AWS_RESULTS_BUCKET = env(
     "AWS_RESULTS_BUCKET",
     default="ecg-lambdas-results-785236377332-sa-east-1",
 )
-# Nomes reais deployados (terraform prefixa com app_name "ecg-lambdas").
-AWS_LAMBDA_GRIDLINE_TRACE = env(
-    "AWS_LAMBDA_GRIDLINE_TRACE",
-    default="ecg-lambdas-lambda-1-gridline-and-trace",
-)
-AWS_LAMBDA_SIGNAL_EXTRACTION = env(
-    "AWS_LAMBDA_SIGNAL_EXTRACTION",
-    default="ecg-lambdas-lambda-2-signal-extraction",
-)
-AWS_LAMBDA_DIAGNOSIS = env(
-    "AWS_LAMBDA_DIAGNOSIS",
-    default="ecg-lambdas-lambda-3-diagnosis",
-)
+# Single Lambda responsible for ECG pixel extraction.
+AWS_LAMBDA_ECG_ANALYSER = env("AWS_LAMBDA_ECG_ANALYSER", default="ecg-analyser")
 PRESIGN_URL_EXPIRES = env.int("PRESIGN_URL_EXPIRES", default=3600)
+
+# Must exceed the configured analyser Lambda timeout (recommended 240s).
+AWS_LAMBDA_READ_TIMEOUT = env.int("AWS_LAMBDA_READ_TIMEOUT", default=270)

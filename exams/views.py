@@ -2,8 +2,9 @@ import logging
 import uuid
 
 from django.shortcuts import get_object_or_404
+from django.db import transaction
 from django.utils import timezone
-from rest_framework import pagination, status
+from rest_framework import pagination, status, serializers
 from rest_framework.exceptions import APIException
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -106,6 +107,9 @@ class AttemptCreateView(APIView):
             exam=exam,
             status=ExamStatus.CRIADO,
             imagem_s3_key=key,
+            calibracao={"speed_mm_s": float(serializer.validated_data["speed_mm_s"]),
+                        "gain_mm_mv": float(serializer.validated_data["gain_mm_mv"]),
+                        "source": "user_selected"},
         )
         # Exam ganha uma nova tentativa: volta ao estado inicial do fluxo.
         if exam.status in (
@@ -133,22 +137,41 @@ class AttemptCreateView(APIView):
 
 
 class AttemptProcessView(APIView):
-    """POST .../attempts/<id>/process/ — Fase A (lambda-1 + lambda-2)."""
+    """POST process: one ecg-analyser Lambda."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request, exam_id, attempt_id):
+        """Return persisted state without triggering the Lambda a second time."""
+        attempt = _attempt_or_404(request.user, exam_id, attempt_id)
+        saved = attempt.sinais or {}
+        keys = saved if isinstance(saved, dict) else {}
+        def link(key):
+            return (services.presign_get_url(settings.AWS_RESULTS_BUCKET, key,
+                    settings.PRESIGN_URL_EXPIRES) if key else None)
+        return Response({
+            "status": attempt.status,
+            "analyser_status": keys.get("analyser_status"),
+            "warnings": keys.get("warnings", []),
+            "fidelidade": attempt.fidelidade,
+            "image_type": attempt.image_type,
+            "overlay_trace_url": link(attempt.overlay_trace_s3_key),
+            "overlay_signal_url": link(attempt.overlay_signal_s3_key),
+            "working_image_url": link(keys.get("working_image_s3_key")),
+            "result_url": link(keys.get("result_s3_key")),
+        })
 
     def post(self, request, exam_id, attempt_id):
         attempt = _attempt_or_404(request.user, exam_id, attempt_id)
         exam = attempt.exam
-        if attempt.status != ExamStatus.CRIADO:
-            return Response(
-                {"detail": f"Tentativa em estado {attempt.status} — processar exige 'criado'."},
-                status=status.HTTP_409_CONFLICT,
-            )
-
+        # CAS: two taps / network retries must never launch two Lambdas.
+        updated = ExamAttempt.objects.filter(pk=attempt.pk, status=ExamStatus.CRIADO).update(
+            status=ExamStatus.FASE_A_PROCESSANDO, updated_at=timezone.now())
+        if not updated:
+            return Response({"detail": "A tentativa já foi iniciada. Consulte o GET process/."},
+                            status=status.HTTP_409_CONFLICT)
         attempt.status = ExamStatus.FASE_A_PROCESSANDO
         exam.status = ExamStatus.FASE_A_PROCESSANDO
-        attempt.save(update_fields=["status", "updated_at"])
         exam.save(update_fields=["status", "updated_at"])
 
         try:
@@ -159,18 +182,74 @@ class AttemptProcessView(APIView):
             exam.status = ExamStatus.ERRO
             attempt.save(update_fields=["status", "updated_at"])
             exam.save(update_fields=["status", "updated_at"])
-            raise UpstreamAPIError(str(exc))
+            raise UpstreamAPIError("O processamento não pôde ser concluído. Consulte o estado do exame.")
 
-        attempt.status = ExamStatus.AGUARDANDO_APROVACAO
-        exam.status = ExamStatus.AGUARDANDO_APROVACAO
+        rejected = result.get("analyser_status", "").startswith("REJECTED_")
+        attempt.status = ExamStatus.REJEITADO if rejected else ExamStatus.AGUARDANDO_APROVACAO
+        exam.status = attempt.status
         attempt.save(update_fields=["status", "updated_at"])
         exam.save(update_fields=["status", "updated_at"])
         result["status"] = attempt.status
         return Response(result)
 
 
+
+class PaintPointSerializer(serializers.Serializer):
+    x=serializers.FloatField(min_value=0,max_value=1)
+    y=serializers.FloatField(min_value=0,max_value=1)
+
+class PaintStrokeSerializer(serializers.Serializer):
+    lead=serializers.ChoiceField(choices=['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6','II_longo'])
+    mode=serializers.ChoiceField(choices=['include','exclude'])
+    points=PaintPointSerializer(many=True,allow_empty=False,max_length=3000)
+
+class PaintRequestSerializer(serializers.Serializer):
+    coordinate_system=serializers.ChoiceField(choices=['normalized_image_v1'])
+    lead=serializers.ChoiceField(choices=['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6','II_longo'])
+    strokes=PaintStrokeSerializer(many=True,allow_empty=False,max_length=200)
+
+    def validate(self,data):
+        import math
+        if any(stroke['lead']!=data['lead'] for stroke in data['strokes']):
+            raise serializers.ValidationError('Selecione uma única derivação por revisão')
+        if sum(len(stroke['points']) for stroke in data['strokes']) > 12000:
+            raise serializers.ValidationError('Número total de pontos excede o limite')
+        if any(not math.isfinite(point['x']) or not math.isfinite(point['y'])
+               for stroke in data['strokes'] for point in stroke['points']):
+            raise serializers.ValidationError('Coordenadas devem ser números finitos')
+        return data
+
+class AttemptRefineView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, exam_id, attempt_id):
+        serializer = PaintRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        # Acquire a brief DB lock before remote invocation. Never hold this lock
+        # while waiting on Lambda: block other refine/approve requests by state.
+        with transaction.atomic():
+            attempt = _attempt_or_404(request.user, exam_id, attempt_id)
+            attempt = ExamAttempt.objects.select_for_update().get(pk=attempt.pk)
+            if attempt.status != ExamStatus.AGUARDANDO_APROVACAO:
+                return Response({'detail': 'Tentativa em processamento ou não revisável.'}, status=409)
+            attempt.status = ExamStatus.FASE_A_PROCESSANDO
+            attempt.save(update_fields=['status', 'updated_at'])
+        try:
+            result = services.run_refine(attempt, attempt.exam,
+                serializer.validated_data['lead'], serializer.validated_data['strokes'])
+            return Response(result)
+        except services.UpstreamError:
+            logger.exception("Refinamento falhou para attempt %s", attempt.id)
+            raise UpstreamAPIError("Falha no refinamento. O resultado anterior foi preservado.")
+        finally:
+            # Preserve last verified version even on Lambda errors/timeouts.
+            with transaction.atomic():
+                ExamAttempt.objects.filter(pk=attempt.pk, status=ExamStatus.FASE_A_PROCESSANDO).update(
+                    status=ExamStatus.AGUARDANDO_APROVACAO, updated_at=timezone.now())
+
+
 class AttemptApproveView(APIView):
-    """POST /api/exams/<id>/attempts/<aid>/aprovar/ — Fase B (lambda-3)."""
+    """POST approve: review extracted trace, without clinical diagnosis."""
 
     permission_classes = [IsAuthenticated]
 
@@ -184,13 +263,16 @@ class AttemptApproveView(APIView):
             )
         if not attempt.sinais:
             return Response(
-                {"detail": "Fase A não concluída — sem sinais salvos para diagnosticar."},
+                {"detail": "Extração não concluída — sem sinais para revisão."},
                 status=status.HTTP_409_CONFLICT,
             )
 
+        updated = ExamAttempt.objects.filter(pk=attempt.pk, status=ExamStatus.AGUARDANDO_APROVACAO).update(
+            status=ExamStatus.FASE_B_PROCESSANDO, updated_at=timezone.now())
+        if not updated:
+            return Response({"detail": "A tentativa foi alterada por outra requisição."}, status=409)
         attempt.status = ExamStatus.FASE_B_PROCESSANDO
         exam.status = ExamStatus.FASE_B_PROCESSANDO
-        attempt.save(update_fields=["status", "updated_at"])
         exam.save(update_fields=["status", "updated_at"])
 
         try:
@@ -201,7 +283,7 @@ class AttemptApproveView(APIView):
             exam.status = ExamStatus.ERRO
             attempt.save(update_fields=["status", "updated_at"])
             exam.save(update_fields=["status", "updated_at"])
-            raise UpstreamAPIError(str(exc))
+            raise UpstreamAPIError("O processamento não pôde ser concluído. Consulte o estado do exame.")
 
         attempt.status = ExamStatus.CONCLUIDO
         exam.status = ExamStatus.CONCLUIDO
@@ -224,9 +306,12 @@ class AttemptRejectView(APIView):
                 {"detail": f"Estado {attempt.status} — rejeitar exige 'aguardando_aprovacao'."},
                 status=status.HTTP_409_CONFLICT,
             )
+        updated = ExamAttempt.objects.filter(pk=attempt.pk, status=ExamStatus.AGUARDANDO_APROVACAO).update(
+            status=ExamStatus.REJEITADO, updated_at=timezone.now())
+        if not updated:
+            return Response({"detail": "A tentativa foi alterada por outra requisição."}, status=409)
         attempt.status = ExamStatus.REJEITADO
         exam.status = ExamStatus.REJEITADO
-        attempt.save(update_fields=["status", "updated_at"])
         exam.save(update_fields=["status", "updated_at"])
         return Response({"status": attempt.status})
 

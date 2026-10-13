@@ -5,7 +5,7 @@ from django.conf import settings
 from . import services
 from .models import Exam, ExamAttempt, Feedback, Patient, Report
 
-VALID_IMAGE_EXTS = {"png", "jpg", "jpeg", "bmp", "gif", "webp", "tiff"}
+VALID_IMAGE_EXTS = {"png", "jpg", "jpeg", "webp"}
 
 
 class PatientSerializer(serializers.ModelSerializer):
@@ -153,6 +153,8 @@ class AttemptCreateSerializer(serializers.Serializer):
 
     filename = serializers.CharField(required=False, allow_blank=True)
     content_type = serializers.CharField(required=False, allow_blank=True)
+    speed_mm_s = serializers.ChoiceField(choices=[5, 12.5, 25, 50, 100], required=True)
+    gain_mm_mv = serializers.ChoiceField(choices=[1, 2, 5, 10, 20], required=True)
 
     def validate(self, attrs):
         ext = "png"
@@ -172,6 +174,9 @@ class AttemptCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"filename": f"Extensão de imagem não suportada: '{ext}'."}
             )
+        declared = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}[ext]
+        if content_type and content_type.lower() != declared:
+            raise serializers.ValidationError({"content_type": "O MIME não corresponde à extensão do arquivo."})
         attrs["_ext"] = ext
         return attrs
 

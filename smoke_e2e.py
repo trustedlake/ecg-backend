@@ -1,133 +1,88 @@
-"""Smoke E2E ponta-a-ponta contra AWS real (lambdas + S3) e servidor Django.
+"""Manual end-to-end smoke using real Django + S3 + single Lambda.
 
-Fluxo: login -> criar exame -> criar attempt (presigned PUT) -> subir imagem
-real -> Fase A (lambda-1 + lambda-2) -> aprovar (lambda-3) -> detail + feedback.
-Limpa todos os artefatos (S3 + Neon) ao final.
+Requires: explicit SMOKE_IMAGE_PATH, production/test DB configured and temporary
+user authorization. DO NOT run without a disposable test environment.
 """
-
-import json
-import os
-import time
-
+import os, pathlib, uuid
 import boto3
-import django
 import requests
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+import django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings')
 django.setup()
+from django.contrib.auth import get_user_model
+from rest_framework.authtoken.models import Token
+from django.conf import settings
 
-from django.conf import settings  # noqa: E402
-from django.contrib.auth import get_user_model  # noqa: E402
-from rest_framework.authtoken.models import Token  # noqa: E402
-
-BASE = os.environ.get("SMOKE_BASE_URL", "http://127.0.0.1:8001")
-USERNAME = "smoke-e2e"
-EMAIL = "smoke-e2e@test.local"
-PASS = "smoke-e2e-senha-1"
-SESSION = requests.Session()
-User = get_user_model()
-S3 = boto3.Session(profile_name=os.environ.get("AWS_PROFILE") or None, region_name=settings.AWS_REGION).client("s3")
-
-
-def api(method, path, **kw):
-    kw.setdefault("timeout", (30, 900))
-    r = SESSION.request(method, BASE + path, **kw)
-    print(f"  HTTP {r.status_code} {method} {path}")
-    return r
-
-
-def cleanup_keys(keys):
-    for k in keys:
-        try:
-            S3.delete_object(Bucket=settings.AWS_IMAGES_BUCKET, Key=k)
-        except Exception:
-            pass
-        try:
-            S3.delete_object(Bucket=settings.AWS_RESULTS_BUCKET, Key=k)
-        except Exception:
-            pass
-
+BASE=os.environ.get('SMOKE_BASE_URL','http://127.0.0.1:8001').rstrip('/')
 
 def main():
-    # usu??rio tempor??rio
-    user = User.objects.create_user(username=USERNAME, email=EMAIL, password=PASS, name="Smoke E2E", crm="CRM-E2E")
-    token = Token.objects.create(user=user)
-    SESSION.headers["Authorization"] = f"Token {token.key}"
-
-    to_delete_keys = []
+    image=os.environ.get('SMOKE_IMAGE_PATH')
+    if not image or not pathlib.Path(image).is_file():
+        raise SystemExit('Informe SMOKE_IMAGE_PATH com foto ECG controlada')
+    if os.environ.get('SMOKE_ALLOW_MUTATIONS')!='YES':
+        raise SystemExit('SMOKE_ALLOW_MUTATIONS=YES é obrigatório; rode só em ambiente descartável')
+    username='smoke-'+uuid.uuid4().hex[:10]
+    User=get_user_model()
+    user=User.objects.create_user(username=username,email=username+'@example.test',password='Smoke!123',name='Smoke',crm='TEMP')
+    session=requests.Session()
+    attempt_id=None
+    uploaded_image_key=None
     try:
-        # 1. login real
-        r = api("POST", "/api/auth/login/", json={"username": USERNAME, "password": PASS})
-        assert r.status_code == 200, r.text
-
-        # 2. exame com paciente inline
-        r = api("POST", "/api/exams/", json={"name": "Paciente Smoke", "age": 44, "gender": "M", "reason": "e2e"})
-        assert r.status_code == 201, r.text
-        exam = r.json()
-        exam_id = exam["id"]
-        print(f"  exam_id={exam_id} status={exam['status']}")
-
-        # 3. attempt -> presigned PUT
-        r = api("POST", f"/api/exams/{exam_id}/attempts/", json={"filename": "Screenshot 2026-06-07 at 20.04.17.png"})
-        assert r.status_code == 201, r.text
-        body = r.json()
-        attempt_id = body["attempt_id"]
-        upload_url = body["upload_url"]
-        s3_key = body["imagem_s3_key"]
-        to_delete_keys.append(s3_key)
-
-        # 4. baixar a imagem de teste do S3 e subir via presigned PUT (sem passar pelo Django)
-        #    IMPORTANTE: a chamada NÃO pode carregar o header Authorization (Token) — S3 rejeita.
-        img = S3.get_object(Bucket=settings.AWS_IMAGES_BUCKET, Key="test_images/Screenshot 2026-06-07 at 20.04.17.png")["Body"].read()
-        r = requests.put(upload_url, data=img, timeout=(30, 300))
-        assert r.status_code == 200, f"presigned PUT falhou: {r.status_code} {r.text}"
-        print(f"  imagem {s3_key} enviada via presigned PUT ({len(img)} bytes)")
-
-        # 5. Fase A (lambda-1 + lambda-2) ??? s??ncrona, pode demorar
-        t0 = time.time()
-        r = api("POST", f"/api/exams/{exam_id}/attempts/{attempt_id}/process/")
-        print(f"  Fase A levou {time.time() - t0:.1f}s")
-        assert r.status_code == 200, r.text
-        pa = r.json()
-        assert pa["status"] == "aguardando_aprovacao", pa
-        print(f"  Fase A ok: image_type={pa['image_type']} fidelidade={pa['fidelidade']}")
-        to_delete_keys.append(f"results/{exam_id}/trace_mask.npz")
-        to_delete_keys.append(f"results/{exam_id}/overlay_trace.png")
-        to_delete_keys.append(f"results/{exam_id}/overlay_signal.png")
-
-        # 6. confirmar que o overlay é baixável (GET sem Authorization, como <img>)
-        ov = requests.get(pa["overlay_trace_url"], timeout=60)
-        print(f"  overlay_trace GET: {ov.status_code} ({len(ov.content)} bytes)")
-        assert ov.status_code == 200
-
-        # 7. Fase B — lambda-3
-        t0 = time.time()
-        r = api("POST", f"/api/exams/{exam_id}/attempts/{attempt_id}/aprovar/")
-        print(f"  Fase B levou {time.time() - t0:.1f}s")
-        assert r.status_code == 200, r.text
-        report = r.json()
-        print(f"  Report: ritmo={report.get('ritmo', {}).get('ritmo')!r} "
-              f"fc={report.get('ritmo', {}).get('fc_bpm')} eixo={report.get('eixo_graus')} "
-              f"confiabilidade={report.get('confiabilidade')} versao={report.get('versao_codigo')}")
-        print(f"  conclusao: {report.get('conclusao')}")
-        assert all(k in report for k in ["imagem_original_url", "overlay_trace_url", "overlay_signal_url"])
-
-        # 8. detail do exame
-        r = api("GET", f"/api/exams/{exam_id}")
-        assert r.status_code == 200, r.text
-        det = r.json()
-        attempts = det["attempts"]
-        print(f"  detail: status={det['status']} attempts={len(attempts)}")
-        concluded = [a for a in attempts if a["status"] == "concluido"]
-        assert concluded and concluded[0]["report"], "report ausente na detail"
-        print("  E2E RODOU AT?? O FIM COM LAMBDAS REAIS")
+        token=Token.objects.create(user=user)
+        session.headers['Authorization']='Token '+token.key
+        def api(method,path,**kwargs):
+            r=session.request(method,BASE+path,timeout=(15,390),**kwargs)
+            print(method,path,'->',r.status_code)
+            r.raise_for_status()
+            return r.json()
+        api('POST','/api/auth/login/',json={'username':username.upper(),'password':'Smoke!123'})
+        exam=api('POST','/api/exams/',json={'name':'Paciente Smoke','age':44,'gender':'M','reason':'teste'})
+        eid=exam['id']
+        attempt=api('POST',f'/api/exams/{eid}/attempts/',json={'filename':pathlib.Path(image).name,'content_type':'image/png','speed_mm_s':25,'gain_mm_mv':10})
+        aid=attempt['attempt_id']
+        attempt_id=aid
+        uploaded_image_key=attempt['imagem_s3_key']
+        b=pathlib.Path(image).read_bytes()
+        r=requests.put(attempt['upload_url'],data=b,headers={'Content-Type':'image/png'},timeout=90)
+        r.raise_for_status()
+        result=api('POST',f'/api/exams/{eid}/attempts/{aid}/process/')
+        assert result['analyser_status'] in ('CONSISTENCY_PASS','REVIEW_REQUIRED','REJECTED_LOW_TRACE_GRID_CONTRAST')
+        state=api('GET',f'/api/exams/{eid}/attempts/{aid}/process/')
+        assert state['analyser_status']==result['analyser_status']
+        if result['analyser_status'].startswith('REJECTED_'):
+            assert session.post(BASE+f'/api/exams/{eid}/attempts/{aid}/aprovar/').status_code==409
+        else:
+            # Refine requires user-supplied valid lead-specific pixel markings;
+            # do not invent a stroke that may fall outside the lead ROI.
+            if os.environ.get('SMOKE_REFINE_JSON'):
+                import json
+                paint=json.loads(pathlib.Path(os.environ['SMOKE_REFINE_JSON']).read_text())
+                api('POST',f'/api/exams/{eid}/attempts/{aid}/refine/',json=paint)
+            action=os.environ.get('SMOKE_ACTION','approve')
+            if action == 'reject':
+                api('POST',f'/api/exams/{eid}/attempts/{aid}/rejeitar/')
+            elif action == 'approve':
+                api('POST',f'/api/exams/{eid}/attempts/{aid}/aprovar/')
+            else:
+                raise ValueError('SMOKE_ACTION must be approve or reject')
+        detail=api('GET',f'/api/exams/{eid}/')
+        assert detail['id']==eid
+        print('OK: single Lambda and persisted state; S3 cleanup follows')
     finally:
-        cleanup_keys(to_delete_keys)
+        # Restrict cleanup strictly to the UUID allocated for this smoke run.
+        try:
+            s3=boto3.Session(region_name=settings.AWS_REGION).client('s3')
+            if uploaded_image_key:
+                s3.delete_object(Bucket=settings.AWS_IMAGES_BUCKET,Key=uploaded_image_key)
+            if attempt_id:
+                prefix='ecg-analyser/'+str(attempt_id)+'/'
+                paginator=s3.get_paginator('list_objects_v2')
+                for page in paginator.paginate(Bucket=settings.AWS_RESULTS_BUCKET,Prefix=prefix):
+                    objs=[{'Key':x['Key']} for x in page.get('Contents',[])]
+                    if objs:s3.delete_objects(Bucket=settings.AWS_RESULTS_BUCKET,Delete={'Objects':objs,'Quiet':True})
+        except Exception as exc:
+            print('WARNING: S3 cleanup failed; cleanup manually:',exc)
         Token.objects.filter(user=user).delete()
         user.delete()
-        assert not User.objects.filter(email=EMAIL).exists()
-        print("  limpeza feita")
 
-
-if __name__ == "__main__":
-    main()
+if __name__=='__main__': main()

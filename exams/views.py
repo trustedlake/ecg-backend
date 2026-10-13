@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import timedelta
 
 from django.shortcuts import get_object_or_404
 from django.db import transaction
@@ -39,12 +40,37 @@ class ExamPagination(pagination.PageNumberPagination):
 
 
 def _attempt_or_404(user, exam_id, attempt_id):
-    return get_object_or_404(
+    attempt = get_object_or_404(
         ExamAttempt.objects.select_related("exam", "exam__patient"),
         id=attempt_id,
         exam__id=exam_id,
         exam__doctor=user,
     )
+    return _recover_stale_attempt(attempt)
+
+
+def _recover_stale_attempt(attempt):
+    """Unstick an attempt left in fase_a_processando by an interrupted request.
+
+    If a previous analysis already stored artifacts, the interrupted call was a refine:
+    go back to the last reviewable version. Otherwise the analysis never finished: erro.
+    """
+    if attempt.status != ExamStatus.FASE_A_PROCESSANDO:
+        return attempt
+    limit = timezone.now() - timedelta(seconds=settings.STALE_PROCESSING_SECONDS)
+    if attempt.updated_at > limit:
+        return attempt
+    saved = attempt.sinais if isinstance(attempt.sinais, dict) else {}
+    new_status = ExamStatus.AGUARDANDO_APROVACAO if saved.get("result_s3_key") else ExamStatus.ERRO
+    updated = ExamAttempt.objects.filter(
+        pk=attempt.pk, status=ExamStatus.FASE_A_PROCESSANDO, updated_at__lte=limit,
+    ).update(status=new_status, updated_at=timezone.now())
+    if updated:
+        logger.warning("Tentativa %s presa em processamento; marcada como %s", attempt.id, new_status)
+        Exam.objects.filter(pk=attempt.exam_id, status=ExamStatus.FASE_A_PROCESSANDO).update(
+            status=new_status, updated_at=timezone.now())
+        attempt.refresh_from_db()
+    return attempt
 
 
 class ExamListCreateView(APIView):

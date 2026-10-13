@@ -301,3 +301,35 @@ class FeedbackTest(BaseAPITestCase):
         attempt = self._attempt(self._exame(doctor=self.other))
         resp = self.client.post(reverse("attempt-feedback", args=[attempt.id]), {"issues": []}, format="json")
         self.assertEqual(resp.status_code, 404)
+
+
+class StaleProcessingRecoveryTest(BaseAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.exam = self._exame()
+        self.attempt = self._attempt(self.exam, status_=ExamStatus.FASE_A_PROCESSANDO)
+        Exam.objects.filter(pk=self.exam.pk).update(status=ExamStatus.FASE_A_PROCESSANDO)
+        self.url = reverse("attempt-process", args=[self.exam.id, self.attempt.id])
+
+    def _age(self, seconds):
+        from datetime import timedelta
+        from django.utils import timezone
+        ExamAttempt.objects.filter(pk=self.attempt.pk).update(updated_at=timezone.now() - timedelta(seconds=seconds))
+
+    @mock.patch("exams.services.presign_get_url", return_value="https://signed")
+    def test_recent_processing_is_left_alone(self, _signed):
+        self._age(30)
+        self.assertEqual(self.client.get(self.url).data["status"], ExamStatus.FASE_A_PROCESSANDO)
+
+    @mock.patch("exams.services.presign_get_url", return_value="https://signed")
+    def test_stale_analysis_becomes_error(self, _signed):
+        self._age(100000)
+        self.assertEqual(self.client.get(self.url).data["status"], ExamStatus.ERRO)
+        self.exam.refresh_from_db()
+        self.assertEqual(self.exam.status, ExamStatus.ERRO)
+
+    @mock.patch("exams.services.presign_get_url", return_value="https://signed")
+    def test_stale_refine_returns_to_review(self, _signed):
+        ExamAttempt.objects.filter(pk=self.attempt.pk).update(sinais={"result_s3_key": "ecg-analyser/x/initial/result.json"})
+        self._age(100000)
+        self.assertEqual(self.client.get(self.url).data["status"], ExamStatus.AGUARDANDO_APROVACAO)

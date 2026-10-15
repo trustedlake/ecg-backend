@@ -44,7 +44,7 @@ python manage.py check --deploy --fail-level WARNING  # após configurar produç
 
 A suíte `manage.py test` e a execução real de AWS exigem instalações e serviços não disponíveis no ambiente da auditoria. Para uso clínico, ainda são necessárias validação médica, tratamento de dados pessoais e processos regulatórios apropriados.
 
-Veja `INTEGRACAO_ECG.md` para contratos e limites adicionais.
+Veja `INTEGRACAO_ECG.md` para contratos e limites adicionais. O contrato v1 das lambdas de leitura e interpretação (e as lambdas mock que o implementam) está em `CONTRATO_LAMBDAS.md` e `mock_lambdas/`.
 
 
 ## Atualização para uma Lambda (não executada na AWS)

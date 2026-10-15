@@ -326,7 +326,7 @@ def _draw_overlay(image, geometry, leads):
 
 def _png(image):
     buf = io.BytesIO()
-    image.save(buf, format="PNG", optimize=True)
+    image.save(buf, format="PNG")
     return buf.getvalue()
 
 

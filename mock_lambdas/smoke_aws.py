@@ -13,6 +13,7 @@ import sys
 import uuid
 
 import boto3
+from botocore.config import Config
 
 IMAGES_BUCKET = "ecg-lambdas-images-785236377332-sa-east-1"
 READING, INTERPRETATION = "ecg-reading-mock", "ecg-interpretation-mock"
@@ -26,7 +27,8 @@ def main():
     args = parser.parse_args()
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
-    s3, lam = session.client("s3"), session.client("lambda")
+    s3 = session.client("s3", config=Config(signature_version="s3v4"))
+    lam = session.client("lambda")
     if args.image:
         body = open(args.image, "rb").read()
     else:

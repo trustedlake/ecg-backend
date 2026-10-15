@@ -16,7 +16,7 @@ Aprovação confirma **extração**, sem laudo clínico. Rejeição por contrast
 ## Contrato v1 de duas lambdas (leitura + interpretação)
 
 O fluxo novo separa **leitura** (imagem + layout → sinal + overlay com gridline, podendo recusar a foto) e
-**interpretação** (sinal + sexo → resumo + detalhado). O contrato está em [`CONTRATO_LAMBDAS.md`](CONTRATO_LAMBDAS.md).
-As lambdas mock `ecg-reading-mock` e `ecg-interpretation-mock` (`mock_lambdas/`) o implementam com resultados
+**interpretação** (sinal + sexo → resumo + detalhado). O contrato está em [`CONTRATO_LAMBDAS.md`](https://github.com/tl-gmiler/ecg-lambdas-v1/blob/main/CONTRATO_LAMBDAS.md), no repo [ecg-lambdas-v1](https://github.com/tl-gmiler/ecg-lambdas-v1).
+As lambdas mock `ecg-reading-mock` e `ecg-interpretation-mock` ([`mock_lambdas/`](https://github.com/tl-gmiler/ecg-lambdas-v1/tree/main/mock_lambdas), no mesmo repo) o implementam com resultados
 sintéticos e cenários selecionáveis, para validar o fluxo antes dos scripts reais. O backend ainda chama
 `ecg-analyser`; a troca é feita no card de migração.

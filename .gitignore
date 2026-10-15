@@ -40,7 +40,3 @@ infra/keys/*
 .vscode/
 .DS_Store
 Thumbs.db
-# Lambdas mock (mock_lambdas/) — pacotes gerados por build.sh e state local do Terraform
-mock_lambdas/build/
-mock_lambdas/infra/.terraform/
-mock_lambdas/infra/*.tfstate*

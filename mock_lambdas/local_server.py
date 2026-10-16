@@ -4,10 +4,12 @@ Para desenvolver e conferir o app (etapas F2–F4) sem gravar nada na AWS:
 - `services._lambda_client()` vira um cliente falso que chama `reading/handler.py` e
   `interpretation/handler.py` direto (envelope e validações de verdade do `invoke_contract`);
 - o S3 (presigned PUT/GET, artefatos das lambdas, sinal) vira uma pasta local servida em `/__local_s3/`;
-- `ECG_TASK_MODE=inline`, cenários de teste ligados e um usuário staff `dev` / `dev12345`.
+- `ECG_TASK_MODE=inline`, cenários de teste ligados e um usuário staff `dev` / `dev12345`;
+- `--async N`: imita a fila de produção. O endpoint responde 202 na hora e a fase roda numa thread
+  depois de N segundos (o app faz polling, como com o worker SQS).
 
 Uso (venv com os requirements do backend + Pillow + numpy):
-    python mock_lambdas/local_server.py [--port 23132] [--data /tmp/ecg-local]
+    python mock_lambdas/local_server.py [--port 23132] [--data /tmp/ecg-local] [--async 3]
 Se existir `frontend_dist/` (export web do Expo), o app web abre na raiz, mesma origem da API.
 """
 
@@ -28,6 +30,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=23132)
     parser.add_argument("--data", default="/tmp/ecg-local", help="pasta do SQLite e do S3 falso")
+    parser.add_argument("--async", dest="async_delay", type=float, default=None, metavar="SEGUNDOS",
+                        help="roda as fases numa thread após SEGUNDOS (imita a fila SQS)")
     return parser.parse_args()
 
 
@@ -123,7 +127,7 @@ def main():
     from django.views.decorators.csrf import csrf_exempt
 
     from config import urls
-    from exams import services
+    from exams import services, tasks
 
     s3 = FakeS3()
     fake_lambda = FakeLambda(s3)
@@ -132,6 +136,24 @@ def main():
     services.presign_put_url = lambda bucket, key, expires_in, content_type=None: (
         f"{BASE_URL}/__local_s3/{bucket}/{key}")
     services.presign_get_url = lambda bucket, key, expires_in: f"{BASE_URL}/__local_s3/{bucket}/{key}"
+
+    if ARGS.async_delay is not None:
+        import threading
+        import time
+
+        from django.db import connection
+
+        def dispatch_async(task, attempt):
+            def worker():
+                time.sleep(ARGS.async_delay)
+                try:
+                    tasks.run_task(task, str(attempt.pk))
+                finally:
+                    connection.close()
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        tasks.dispatch = dispatch_async
 
     @csrf_exempt
     def local_s3(request, bucket, key):
@@ -164,7 +186,8 @@ def main():
     if not User.objects.filter(username="dev").exists():
         User.objects.create_superuser(username="dev", password="dev12345", email="dev@local", name="Dra. Dev")
         print("Usuário criado: dev / dev12345 (staff)")
-    print(f"Backend local (lambdas mock + S3 em {S3_DIR}) em {BASE_URL}")
+    mode = "inline" if ARGS.async_delay is None else f"assíncrono, {ARGS.async_delay:g} s por fase"
+    print(f"Backend local (lambdas mock + S3 em {S3_DIR}, fases {mode}) em {BASE_URL}")
     call_command("runserver", f"127.0.0.1:{ARGS.port}", use_reloader=False)
 
 

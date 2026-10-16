@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 from pathlib import Path
 
@@ -35,7 +36,6 @@ SECRET_KEY = env(
 DEBUG = env("DEBUG")
 # Reject the development fallback secret in production.
 if not DEBUG and not env("DJANGO_SECRET_KEY", default="").strip():
-    from django.core.exceptions import ImproperlyConfigured
     raise ImproperlyConfigured("Defina DJANGO_SECRET_KEY em produção")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
@@ -188,6 +188,17 @@ PRESIGN_URL_EXPIRES = env.int("PRESIGN_URL_EXPIRES", default=3600)
 
 # Must exceed the reading Lambda timeout.
 AWS_LAMBDA_READ_TIMEOUT = env.int("AWS_LAMBDA_READ_TIMEOUT", default=270)
+
+# Execução das fases: "inline" (na hora, dev/testes) ou "sqs" (fila consumida pelo worker).
+ECG_TASK_MODE = env("ECG_TASK_MODE", default="inline")
+if ECG_TASK_MODE not in ("inline", "sqs"):
+    raise ImproperlyConfigured("ECG_TASK_MODE deve ser 'inline' ou 'sqs'.")
+ECG_TASK_QUEUE_URL = env("ECG_TASK_QUEUE_URL", default="")
+if ECG_TASK_MODE == "sqs" and not ECG_TASK_QUEUE_URL:
+    raise ImproperlyConfigured("ECG_TASK_MODE=sqs exige ECG_TASK_QUEUE_URL.")
+
+# Versão exposta em /api/health/ (git sha injetado no build da imagem).
+APP_VERSION = env("APP_VERSION", default="dev")
 
 # An attempt stuck in "*_processando" longer than this (seconds) is considered
 # interrupted (e.g. the worker restarted during the Lambda call). Must exceed the

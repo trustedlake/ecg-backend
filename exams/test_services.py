@@ -204,6 +204,7 @@ class RunReadingTest(ServicesTestCase):
         self.assertNotIn("mock", self._sent_payload())
 
         self.attempt.test_scenario = {"read": {"scenario": "refused", "code": "READ_REFUSED_BLURRY"}}
+        ExamAttempt.objects.filter(id=self.attempt.id).update(status=ExamStatus.LEITURA_PROCESSANDO)
         self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
         services.run_reading(self.attempt)
         self.assertEqual(self._sent_payload()["mock"], {"scenario": "refused", "code": "READ_REFUSED_BLURRY"})
@@ -281,6 +282,7 @@ class RunReadingTest(ServicesTestCase):
         ]
         for result in cases:
             with self.subTest(artifacts=result["artifacts"]):
+                ExamAttempt.objects.filter(id=self.attempt.id).update(status=ExamStatus.LEITURA_PROCESSANDO)
                 self._lambda_returns(_envelope("read", self.rid, "OK", result=result))
                 with self.assertLogs("exams.services", "ERROR"):
                     services.run_reading(self.attempt)
@@ -288,6 +290,15 @@ class RunReadingTest(ServicesTestCase):
                 self.assertEqual(self.attempt.status, ExamStatus.ERRO_LEITURA)
                 self.assertEqual(self.attempt.reading["error"]["code"], "INTERNAL_ERROR")
                 self.assertIsNone(self.attempt.reading["artifacts"]["signal"])
+
+    def test_late_result_does_not_overwrite_other_state(self):
+        ExamAttempt.objects.filter(id=self.attempt.id).update(status=ExamStatus.ERRO_LEITURA)
+        self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
+        with self.assertLogs("exams.services", "WARNING"):
+            status = services.run_reading(self.attempt)
+        self._reload()
+        self.assertEqual(status, ExamStatus.ERRO_LEITURA)
+        self.assertIsNone(self.attempt.reading)
 
     def test_exam_mirrors_only_latest_attempt(self):
         newer = ExamAttempt.objects.create(exam=self.exam, status=ExamStatus.CRIADO, imagem_s3_key="k2")

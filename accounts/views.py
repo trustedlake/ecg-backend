@@ -44,7 +44,8 @@ class LoginView(APIView):
                     "username": user.username,
                     "email": user.email,
                     "crm": user.crm,
-                    "is_admin": user.is_staff,
+                    "is_staff": user.is_staff,
+                    "is_admin": user.is_staff,  # legado (apps/web); o app Expo usa is_staff
                 },
             }
         )

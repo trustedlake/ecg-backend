@@ -3,7 +3,7 @@ from rest_framework import serializers
 from django.conf import settings
 
 from . import services
-from .models import EcgLayout, Exam, ExamAttempt, Feedback, Patient, Report, Sex
+from .models import EcgLayout, Exam, ExamAttempt, Feedback, Patient, Sex
 
 CONTENT_TYPE_BY_EXT = {
     "png": "image/png",
@@ -90,39 +90,39 @@ class ExamCreateSerializer(serializers.Serializer):
         )
 
 
-class ReportSerializer(serializers.ModelSerializer):
-    attempt_id = serializers.UUIDField()
+class AttemptSerializer(serializers.ModelSerializer):
+    """Objeto `Attempt` da API (plano §0.1). URLs presigned geradas a cada resposta."""
 
-    class Meta:
-        model = Report
-        fields = [
-            "id", "attempt_id", "classification", "summary", "details",
-            "disclaimer", "warnings", "engine", "engine_version", "created_at",
-        ]
-
-
-class ExamAttemptSerializer(serializers.ModelSerializer):
-    """Provisório: a etapa B3 troca pelo objeto `Attempt` do plano §0.1."""
-
+    exam_id = serializers.UUIDField(read_only=True)
+    calibration = serializers.JSONField(source="calibracao")
     original_image_url = serializers.SerializerMethodField()
-    report = serializers.SerializerMethodField()
+    reading = serializers.SerializerMethodField()
+    interpretation = serializers.SerializerMethodField()
+    can_retry = serializers.SerializerMethodField()
+    needs_new_photo = serializers.SerializerMethodField()
 
     class Meta:
         model = ExamAttempt
         fields = [
-            "id", "exam_id", "status", "layout", "calibracao", "reading",
-            "interpretation", "created_at", "updated_at", "original_image_url",
-            "report",
+            "id", "exam_id", "status", "layout", "calibration", "original_image_url",
+            "reading", "interpretation", "can_retry", "needs_new_photo",
+            "created_at", "updated_at",
         ]
 
     def get_original_image_url(self, obj):
         return services.original_image_url(obj, settings.PRESIGN_URL_EXPIRES)
 
-    def get_report(self, obj):
-        report = getattr(obj, "report", None)
-        if report is None:
-            return None
-        return ReportSerializer(report).data
+    def get_reading(self, obj):
+        return services.attempt_reading_view(obj)
+
+    def get_interpretation(self, obj):
+        return services.attempt_interpretation_view(obj)
+
+    def get_can_retry(self, obj):
+        return services.attempt_flags(obj)["can_retry"]
+
+    def get_needs_new_photo(self, obj):
+        return services.attempt_flags(obj)["needs_new_photo"]
 
 
 class ExamSerializer(serializers.ModelSerializer):
@@ -141,7 +141,7 @@ class ExamDetailSerializer(ExamSerializer):
 
     def get_attempts(self, obj):
         attempts = obj.attempts.all()
-        return ExamAttemptSerializer(attempts, many=True, context=self.context).data
+        return AttemptSerializer(attempts, many=True, context=self.context).data
 
 
 class ScenarioSerializer(serializers.Serializer):

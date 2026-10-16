@@ -11,14 +11,16 @@
 
 import json
 import logging
+from datetime import timedelta
 
 import boto3
 from botocore.config import Config
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 
-from .models import Classification, ExamStatus, Report
+from .models import Classification, Exam, ExamAttempt, ExamStatus, Report
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ LOCAL_ERRORS = {
     "INTERNAL_ERROR": ("internal", True, "Não foi possível concluir o processamento agora. Tente de novo em instantes."),
     "STORAGE_ERROR": ("internal", True, "Falha ao ler os artefatos da leitura. Tente de novo em instantes."),
     "SEX_MISSING": ("validation", False, "Informe o sexo do paciente para interpretar o ECG."),
+    "TASK_TIMEOUT": ("internal", True, "O processamento demorou mais que o esperado. Tente de novo."),
 }
 
 LOG_BODY_LIMIT = 2000
@@ -228,18 +231,77 @@ def _public_warnings(warnings):
 # --------------------------------------------------------------------------- estado
 
 
-def _set_status(attempt, status, **fields):
-    """Grava a tentativa e espelha o status no exame (se ela for a mais recente), em transação."""
-    attempt.status = status
-    for name, value in fields.items():
-        setattr(attempt, name, value)
+def _finish(attempt, phase, status, **fields):
+    """Grava o desfecho da fase só se a tentativa ainda estiver no `*_processando` dela (CAS).
+
+    Um resultado atrasado/duplicado (ex.: depois de um TASK_TIMEOUT) não sobrescreve outro estado."""
+    done = transition(attempt, PHASES[phase][0], status, **fields)
+    if not done:
+        logger.warning("Desfecho %s da fase %s descartado: tentativa %s já está em %s",
+                       status, phase, attempt.id, attempt.status)
+    return done
+
+
+def _mirror_exam(attempt_id, exam_id, status, now):
+    latest = (
+        ExamAttempt.objects.filter(exam_id=exam_id)
+        .order_by("-created_at").values_list("id", flat=True).first()
+    )
+    if latest == attempt_id:
+        Exam.objects.filter(pk=exam_id).update(status=status, updated_at=now)
+
+
+def transition(attempt, from_statuses, to_status, updated_before=None, **fields):
+    """Compare-and-swap: muda o status só se a tentativa ainda estiver em `from_statuses`.
+
+    Dois toques simultâneos (ou dois eventos da fila) não passam os dois. Espelha no exame se a
+    tentativa for a mais recente. Devolve True se esta chamada fez a transição; atualiza `attempt`.
+    """
+    if isinstance(from_statuses, str):
+        from_statuses = (from_statuses,)
+    now = timezone.now()
     with transaction.atomic():
-        attempt.save(update_fields=["status", "updated_at", *fields])
-        exam = attempt.exam
-        latest = exam.attempts.order_by("-created_at").values_list("id", flat=True).first()
-        if latest == attempt.id:
-            exam.status = status
-            exam.save(update_fields=["status", "updated_at"])
+        qs = ExamAttempt.objects.filter(pk=attempt.pk, status__in=from_statuses)
+        if updated_before is not None:
+            qs = qs.filter(updated_at__lte=updated_before)
+        updated = qs.update(status=to_status, updated_at=now, **fields)
+        if updated:
+            _mirror_exam(attempt.pk, attempt.exam_id, to_status, now)
+    attempt.refresh_from_db()
+    return bool(updated)
+
+
+# Fase → (estado em processamento, estado de erro, campo JSON do bloco da fase).
+PHASES = {
+    "read": (ExamStatus.LEITURA_PROCESSANDO, ExamStatus.ERRO_LEITURA, "reading"),
+    "interpret": (ExamStatus.INTERPRETACAO_PROCESSANDO, ExamStatus.ERRO_INTERPRETACAO, "interpretation"),
+}
+
+
+def fail_phase(attempt, phase, code, details=None, updated_before=None):
+    """Marca a fase em processamento como erro local (`INTERNAL_ERROR`, `TASK_TIMEOUT`…), via CAS.
+
+    Na interpretação a leitura é preservada (o retry reaproveita o sinal)."""
+    processing, error_status, field = PHASES[phase]
+    synthetic = _synthetic_envelope(phase, str(attempt.id), code, details)
+    if phase == "read":
+        block = _empty_reading(synthetic)
+        block["error"] = synthetic["error"]
+    else:
+        block = _interpretation_record(synthetic)
+    return transition(attempt, processing, error_status, updated_before=updated_before, **{field: block})
+
+
+def recover_stale(attempt):
+    """Tentativa presa em `*_processando` além de STALE_PROCESSING_SECONDS vira `erro_*` com
+    `TASK_TIMEOUT` (retryable). Ex.: o worker reiniciou no meio da chamada. Devolve a tentativa."""
+    for phase, (processing, _, _) in PHASES.items():
+        if attempt.status != processing:
+            continue
+        limit = timezone.now() - timedelta(seconds=settings.STALE_PROCESSING_SECONDS)
+        if attempt.updated_at <= limit and fail_phase(attempt, phase, "TASK_TIMEOUT", updated_before=limit):
+            logger.warning("Tentativa %s presa em %s; marcada como TASK_TIMEOUT", attempt.id, processing)
+    return attempt
 
 
 def _artifact(ref, request_id):
@@ -331,7 +393,7 @@ def run_reading(attempt):
             ]
             reading["artifacts"]["overlay"] = overlay
             reading["artifacts"]["signal"] = signal
-            _set_status(attempt, ExamStatus.AGUARDANDO_VALIDACAO, reading=reading)
+            _finish(attempt, "read", ExamStatus.AGUARDANDO_VALIDACAO, reading=reading)
             return attempt.status
 
     elif status == STATUS_REFUSED:
@@ -341,13 +403,13 @@ def run_reading(attempt):
         # A prévia é opcional no contrato (§6.3); fora do bucket/prefixo ela é descartada.
         reading["artifacts"]["refusal_preview"] = _artifact(details.get("preview"), request_id)
         reading["refusal_region_px"] = _region_px(details.get("region_px"))
-        _set_status(attempt, ExamStatus.LEITURA_RECUSADA, reading=reading)
+        _finish(attempt, "read", ExamStatus.LEITURA_RECUSADA, reading=reading)
         return attempt.status
 
     else:
         reading["error"] = _public_error(envelope["error"])
 
-    _set_status(attempt, ExamStatus.ERRO_LEITURA, reading=reading)
+    _finish(attempt, "read", ExamStatus.ERRO_LEITURA, reading=reading)
     return attempt.status
 
 
@@ -409,6 +471,8 @@ def run_interpretation(attempt):
             meta = record["meta"]
             classification = summary.get("classification")
             with transaction.atomic():
+                if not _finish(attempt, "interpret", ExamStatus.CONCLUIDO, interpretation=record):
+                    return attempt.status
                 Report.objects.update_or_create(
                     attempt=attempt,
                     defaults={
@@ -421,10 +485,9 @@ def run_interpretation(attempt):
                         "engine_version": str(meta.get("engine_version") or "")[:100],
                     },
                 )
-                _set_status(attempt, ExamStatus.CONCLUIDO, interpretation=record)
             return attempt.status
 
-    _set_status(attempt, ExamStatus.ERRO_INTERPRETACAO, interpretation=_interpretation_record(envelope))
+    _finish(attempt, "interpret", ExamStatus.ERRO_INTERPRETACAO, interpretation=_interpretation_record(envelope))
     return attempt.status
 
 
@@ -469,7 +532,10 @@ def attempt_interpretation_view(attempt):
         "disclaimer": None,
     }
     if record.get("status") in SUCCESS_STATUSES:
-        report = Report.objects.filter(attempt=attempt).first()
+        try:
+            report = attempt.report  # aproveita select_related/prefetch_related da view
+        except Report.DoesNotExist:
+            report = None
         if report is not None:
             view["summary"] = report.summary
             view["details"] = report.details

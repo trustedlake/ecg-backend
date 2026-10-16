@@ -232,7 +232,14 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    # Throttle do login por IP. O cache é local de cada worker do gunicorn: o limite real é
+    # aproximado (x workers x tasks), suficiente contra força bruta simples.
+    'DEFAULT_THROTTLE_RATES': {
+        'login': env("LOGIN_THROTTLE_RATE", default="10/min"),
+    },
 }
+# O API Gateway repassa o IP do cliente em X-Forwarded-For; a task só recebe tráfego dele.
+REST_FRAMEWORK['NUM_PROXIES'] = 1
 
 # AWS — orquestração das lambdas + presigned URLs (Fase 2)
 # Local: boto3 usa a cadeia padrão de credenciais; para dev, exportar

@@ -10,6 +10,8 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import sys
+
 import environ
 from django.core.exceptions import ImproperlyConfigured
 
@@ -39,6 +41,18 @@ if not DEBUG and not env("DJANGO_SECRET_KEY", default="").strip():
     raise ImproperlyConfigured("Defina DJANGO_SECRET_KEY em produção")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+# Origens HTTPS confiáveis para o admin (ex.: https://<api-id>.execute-api.sa-east-1.amazonaws.com).
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+
+# Atrás do API Gateway (HTTPS na borda; a conexão até o container é HTTP pela VPC).
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+# Em prod (só HTTPS via execute-api) a task define 31536000; sem includeSubDomains/preload.
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0)
 
 # CORS — origens Expo Web explícitas; produção deve usar domínio HTTPS autorizado.
 CORS_ALLOWED_ORIGINS = env.list(
@@ -66,6 +80,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -97,15 +112,36 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-# DATABASE_URL (ex.: Neon, sslmode=require) via variável de ambiente.
-# Sem DATABASE_URL definida, cai num SQLite local para desenvolvimento.
+# Ordem: DATABASE_URL; senão DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD (prod: RDS, senha
+# injetada do SSM pelo ECS); senão SQLite local para desenvolvimento.
 
-DATABASES = {
-    "default": env.db(
-        "DATABASE_URL",
-        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
-    )
-}
+def _database_config():
+    if env("DATABASE_URL", default=""):
+        config = env.db("DATABASE_URL")
+    elif env("DB_HOST", default=""):
+        config = {
+            "ENGINE": "django.db.backends.postgresql",
+            "HOST": env("DB_HOST"),
+            "PORT": env.int("DB_PORT", default=5432),
+            "NAME": env("DB_NAME", default="ecg"),
+            "USER": env("DB_USER", default="ecg_admin"),
+            "PASSWORD": env("DB_PASSWORD", default=""),
+            "OPTIONS": {"sslmode": env("DB_SSLMODE", default="require")},
+        }
+    else:
+        return {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
+    config["CONN_MAX_AGE"] = 60
+    config["CONN_HEALTH_CHECKS"] = True
+    return config
+
+
+DATABASES = {"default": _database_config()}
+if (
+    not DEBUG
+    and DATABASES["default"]["ENGINE"] != "django.db.backends.sqlite3"
+    and DATABASES["default"].get("OPTIONS", {}).get("sslmode") not in ("require", "verify-ca", "verify-full")
+):
+    raise ImproperlyConfigured("Em produção o PostgreSQL exige sslmode=require|verify-ca|verify-full.")
 
 
 # Password validation
@@ -127,6 +163,11 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+# Testes: hash de senha rápido (o PBKDF2 padrão deixava a suíte ~10x mais lenta).
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
@@ -143,6 +184,36 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
+
+# SPA: export web do Expo (gerado no build da imagem, fora do git). WhiteNoise serve os
+# arquivos na raiz; a view catch-all de config/urls.py devolve o index.html nas rotas do app.
+FRONTEND_DIST = BASE_DIR / "frontend_dist"
+WHITENOISE_ROOT = FRONTEND_DIST if FRONTEND_DIST.is_dir() else None
+
+# Logging: tudo em stdout (CloudWatch Logs via awslogs), uma linha por evento.
+LOG_LEVEL = env("LOG_LEVEL", default="INFO")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "line": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"},
+    },
+    "handlers": {
+        "stdout": {"class": "logging.StreamHandler", "stream": "ext://sys.stdout", "formatter": "line"},
+    },
+    "root": {"handlers": ["stdout"], "level": LOG_LEVEL},
+    "loggers": {
+        "django": {"handlers": ["stdout"], "level": LOG_LEVEL, "propagate": False},
+        "botocore": {"level": "WARNING"},
+        "boto3": {"level": "WARNING"},
+        "urllib3": {"level": "WARNING"},
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

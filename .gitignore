@@ -44,3 +44,6 @@ Thumbs.db
 mock_lambdas/build/
 mock_lambdas/infra/.terraform/
 mock_lambdas/infra/*.tfstate*
+
+# Export web do Expo (gerado no build da imagem)
+frontend_dist/

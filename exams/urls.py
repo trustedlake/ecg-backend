@@ -1,11 +1,7 @@
 from django.urls import path
 
 from .views import (
-    AttemptApproveView,
     AttemptCreateView,
-    AttemptProcessView,
-    AttemptRefineView,
-    AttemptRejectView,
     ExamDetailView,
     ExamListCreateView,
     FeedbackCreateView,
@@ -18,22 +14,6 @@ urlpatterns = [
         "exams/<uuid:exam_id>/attempts/",
         AttemptCreateView.as_view(),
         name="attempt-create",
-    ),
-    path(
-        "exams/<uuid:exam_id>/attempts/<uuid:attempt_id>/process/",
-        AttemptProcessView.as_view(),
-        name="attempt-process",
-    ),
-    path("exams/<uuid:exam_id>/attempts/<uuid:attempt_id>/refine/", AttemptRefineView.as_view(), name="attempt-refine"),
-    path(
-        "exams/<uuid:exam_id>/attempts/<uuid:attempt_id>/aprovar/",
-        AttemptApproveView.as_view(),
-        name="attempt-aprovar",
-    ),
-    path(
-        "exams/<uuid:exam_id>/attempts/<uuid:attempt_id>/rejeitar/",
-        AttemptRejectView.as_view(),
-        name="attempt-rejeitar",
     ),
     path(
         "attempts/<uuid:attempt_id>/feedback/",

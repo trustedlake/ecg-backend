@@ -177,14 +177,19 @@ AWS_RESULTS_BUCKET = env(
     "AWS_RESULTS_BUCKET",
     default="ecg-lambdas-results-785236377332-sa-east-1",
 )
-# Single Lambda responsible for ECG pixel extraction.
-AWS_LAMBDA_ECG_ANALYSER = env("AWS_LAMBDA_ECG_ANALYSER", default="ecg-analyser")
+# Lambdas do contrato v1 (CONTRATO_LAMBDAS.md). Trocar mock por real = trocar o nome aqui.
+AWS_LAMBDA_ECG_READING = env("AWS_LAMBDA_ECG_READING", default="ecg-reading-mock")
+AWS_LAMBDA_ECG_INTERPRETATION = env(
+    "AWS_LAMBDA_ECG_INTERPRETATION", default="ecg-interpretation-mock"
+)
+# Libera o campo test_scenario (repassado como `mock` às lambdas) para usuários staff.
+ECG_TEST_SCENARIOS_ENABLED = env.bool("ECG_TEST_SCENARIOS_ENABLED", default=False)
 PRESIGN_URL_EXPIRES = env.int("PRESIGN_URL_EXPIRES", default=3600)
 
-# Must exceed the configured analyser Lambda timeout (recommended 240s).
+# Must exceed the reading Lambda timeout.
 AWS_LAMBDA_READ_TIMEOUT = env.int("AWS_LAMBDA_READ_TIMEOUT", default=270)
 
-# An attempt stuck in "fase_a_processando" longer than this (seconds) is considered
-# interrupted (e.g. Django restarted during the Lambda call). Must exceed the gunicorn
-# timeout (360s) so a call still in flight is never recovered by mistake.
+# An attempt stuck in "*_processando" longer than this (seconds) is considered
+# interrupted (e.g. the worker restarted during the Lambda call). Must exceed the
+# Lambda read timeout so a call still in flight is never recovered by mistake.
 STALE_PROCESSING_SECONDS = env.int("STALE_PROCESSING_SECONDS", default=600)

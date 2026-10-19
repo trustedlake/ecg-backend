@@ -141,7 +141,7 @@ def run_phase_a(attempt, exam):
     if not isinstance(output, dict) or output.get("operation") != "read" or not isinstance(output.get("status"), str):
         raise UpstreamError("Resposta da Lambda de leitura inválida")
     envelope = output["status"]
-    warnings = output.get("warnings") or []
+    warnings = []
     attempt.image_type = "ecg_analyser"
     attempt.overlay_signal_s3_key = None
     attempt.fidelidade_por_derivacao = None
@@ -156,6 +156,7 @@ def run_phase_a(attempt, exam):
         if not ok:
             raise UpstreamError("Nenhum método OK com selector_score")
         best = max(ok, key=lambda m: m["selector_score"])
+        warnings = best.get("warnings") or []
         files = best["files"]
         leads_ref = files["leads"]
         leads = _read_json(leads_ref["bucket"], leads_ref["key"])

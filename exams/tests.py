@@ -57,13 +57,14 @@ def _method(name, status, score):
     ok = status == "OK"
     return {"method": name, "version": "v", "status": status, "reason": None if ok else "x",
             "selector_score": score if ok else None, "sampling_rate_hz": 200.0,
+            "warnings": [{"code": "AMBIGUOUS_TRACE", "message": "m", "lead": "V1"}] if name == "b" else [],
             "files": {"json": _file("result.json"), "image": _file("preview.png", "image/png"),
                       "leads": _file("leads.json")}}
 
 
 LAMBDA_READ_OUT = {
     "contract_version": "2.0", "operation": "read", "status": "OK_WITH_WARNINGS",
-    "warnings": [{"code": "METHODS_PARTIAL_RESULT", "message": "m"}], "error": None,
+    "error": None,
     "result": {"methods": [_method("a", "OK", 60.0), _method("b", "OK", 90.0), _method("c", "BLOCKED", None)]},
 }
 
@@ -208,6 +209,7 @@ class AttemptFlowTest(BaseAPITestCase):
         self.assertEqual(self.attempt.status, ExamStatus.AGUARDANDO_APROVACAO)
         self.assertEqual(self.attempt.sinais["analyser_status"], "OK_WITH_WARNINGS")
         self.assertEqual(self.attempt.sinais["chosen_method"], "b")
+        self.assertEqual([w["code"] for w in self.attempt.sinais["warnings"]], ["AMBIGUOUS_TRACE"])
         self.assertEqual(self.attempt.lead_labels, ["I", "II"])
         self.assertTrue(self.attempt.overlay_trace_s3_key.endswith("preview.png"))
 

@@ -58,3 +58,30 @@ output "ecs_execution_role_arn" {
 output "ecs_task_role_arn" {
   value = aws_iam_role.ecs_task.arn
 }
+
+# --- I2 ---
+
+output "api_url" {
+  description = "URL pública (app web, /api e /admin)."
+  value       = aws_apigatewayv2_stage.default.invoke_url
+}
+
+output "cluster_name" {
+  value = aws_ecs_cluster.this.name
+}
+
+output "service_name" {
+  value = aws_ecs_service.backend.name
+}
+
+output "task_family" {
+  value = aws_ecs_task_definition.backend.family
+}
+
+output "log_group" {
+  value = aws_cloudwatch_log_group.backend.name
+}
+
+output "sns_topic_arn" {
+  value = aws_sns_topic.alerts.arn
+}

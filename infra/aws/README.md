@@ -25,8 +25,36 @@ Buckets e lambdas **não** são gerenciados aqui (stacks `ecg-lambdas` e `mock_l
 ```sh
 cd infra/aws
 terraform init
-terraform plan -out tf.plan
+terraform plan -var alarm_email=<seu e-mail> -out tf.plan
 terraform apply tf.plan      # só com aprovação explícita
 ```
 A senha do banco não vai para o plan nem para o state (`password_wo`). Para trocá-la: atualize o
 parâmetro no SSM e rode com `-var db_password_version=<n+1>`.
+
+Depois do primeiro apply, confirme a assinatura do SNS no e-mail recebido (sem isso os alarmes não chegam).
+
+## O que cada arquivo cria
+- `network.tf`, `rds.tf`, `ecr.tf`, `sqs.tf`, `iam.tf` (I1): VPC, SGs, RDS, ECR, fila + DLQ, roles das tasks.
+- `ecs.tf`: cluster `ecg`, task `ecg-backend` (containers `web` e `worker`), serviço e Cloud Map `backend.ecg.internal`.
+- `api.tf`: HTTP API → VPC Link → Cloud Map. A URL fica no output `api_url`.
+- `schedule.tf`: autoscaling (1–2 tasks, CPU 70 %) e o horário comercial.
+- `monitoring.tf`: SNS `ecg-alerts`, 10 alarmes e o budget mensal (US$35).
+
+## Horário de funcionamento
+Seg–sex, fuso `America/Sao_Paulo`: o RDS liga às 07:40 e desliga às 20:10; o ECS sobe às 08:00 e
+vai a 0 às 20:00. Fora disso o API Gateway responde 503 e o app mostra o aviso de horário.
+
+- Exceção pontual: `scripts/ligar.sh` (RDS e depois ECS min 1/max 2) e `scripts/desligar.sh` (o inverso).
+  Valem até a próxima ação agendada.
+- Sempre ligado: `-var office_hours_enabled=false` remove os agendamentos (custo ≈ US$60/mês). Depois
+  rode `scripts/ligar.sh` uma vez, porque o Terraform não mexe no min/max atual do autoscaling.
+- Os horários estão nas variáveis `ecs_start_cron`, `ecs_stop_cron`, `rds_start_cron` e `rds_stop_cron`.
+
+## Tamanho da task
+`task_cpu` (padrão 512 = 0,5 vCPU) e `task_memory` (1024 MB). Para 1 vCPU: `-var task_cpu=1024 -var
+task_memory=2048`. O Terraform registra uma revisão nova da task definition; o serviço só passa a usá-la
+no próximo deploy do pipeline (o serviço ignora `task_definition`).
+
+## Primeiro deploy
+O serviço é criado com 0 tasks, porque a imagem `bootstrap` não existe no ECR. Quem sobe a primeira
+imagem e a primeira revisão é o pipeline (I3, `ci/deploy.sh`).

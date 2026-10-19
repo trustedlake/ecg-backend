@@ -5,20 +5,44 @@ from django.db import models
 
 
 class ExamStatus(models.TextChoices):
+    """Estados da tentativa (docs/fluxo-usuario-v1.md §3). O Exam espelha a mais recente."""
+
     CRIADO = "criado", "Criado"
-    FASE_A_PROCESSANDO = "fase_a_processando", "Fase A processando"
-    AGUARDANDO_APROVACAO = "aguardando_aprovacao", "Aguardando aprovação"
-    APROVADO = "aprovado", "Aprovado"
-    REJEITADO = "rejeitado", "Rejeitado"
-    FASE_B_PROCESSANDO = "fase_b_processando", "Fase B processando"
+    LEITURA_PROCESSANDO = "leitura_processando", "Leitura processando"
+    AGUARDANDO_VALIDACAO = "aguardando_validacao", "Aguardando validação"
+    LEITURA_RECUSADA = "leitura_recusada", "Leitura recusada"
+    ERRO_LEITURA = "erro_leitura", "Erro na leitura"
+    REJEITADO_USUARIO = "rejeitado_usuario", "Rejeitado pelo usuário"
+    INTERPRETACAO_PROCESSANDO = "interpretacao_processando", "Interpretação processando"
     CONCLUIDO = "concluido", "Concluído"
-    ERRO = "erro", "Erro"
+    ERRO_INTERPRETACAO = "erro_interpretacao", "Erro na interpretação"
 
 
-class FidelityVerdict(models.TextChoices):
-    BOM = "bom", "Bom"
-    PARCIAL = "parcial", "Parcial"
-    RUIM = "ruim", "Ruim"
+class Sex(models.TextChoices):
+    F = "F", "Feminino"
+    M = "M", "Masculino"
+
+
+class EcgLayout(models.TextChoices):
+    """Layouts do contrato antigo. A leitura 2.0 só aceita SUPPORTED_LAYOUTS; os demais ficam
+    aqui para os registros já gravados."""
+
+    L3X4 = "3x4", "3x4"
+    L3X4_1 = "3x4+1", "3x4+1"
+    L3X4_3 = "3x4+3", "3x4+3"
+    L6X2 = "6x2", "6x2"
+    L6X2_1 = "6x2+1", "6x2+1"
+    L12X1 = "12x1", "12x1"
+
+
+# Layouts com configuração na ecg-reading 2.0 (CONTRATO_LAMBDAS.md §2); os demais dão LAYOUT_UNSUPPORTED.
+SUPPORTED_LAYOUTS = (EcgLayout.L3X4_1, EcgLayout.L12X1)
+
+
+class Classification(models.TextChoices):
+    NORMAL = "normal", "Normal"
+    BORDERLINE = "borderline", "Limítrofe"
+    ABNORMAL = "abnormal", "Anormal"
 
 
 class Patient(models.Model):
@@ -30,7 +54,8 @@ class Patient(models.Model):
     )
     name = models.CharField(max_length=255)
     age = models.IntegerField()
-    gender = models.CharField(max_length=50)
+    # Usado na interpretação (CONTRATO_LAMBDAS.md §3.1). Nulo só em pacientes legados.
+    sex = models.CharField(max_length=1, choices=Sex.choices, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -54,8 +79,6 @@ class Exam(models.Model):
         max_length=40, choices=ExamStatus.choices, default=ExamStatus.CRIADO
     )
     reason = models.TextField(blank=True, default="")
-    # Único layout aceito no MVP (decisão #5): "3x4+1".
-    ecg_layout = models.CharField(max_length=20, default="3x4+1")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -64,9 +87,23 @@ class Exam(models.Model):
 
 
 class ExamAttempt(models.Model):
-    """Cada tentativa de processamento é uma linha imutável, nunca sobrescrita.
-    Reprocessar = criar nova linha (histórico para treinar/melhorar o
-    algoritmo)."""
+    """Uma foto do ECG passando pela leitura e pela interpretação.
+
+    Recusar ou refazer com outra foto = criar nova linha (histórico preservado).
+
+    `reading` (gravado pela leitura, sem `samples` — o sinal fica no S3)::
+
+        {status, warnings, error, meta, grid,
+         leads: [{name, kind, quality, coverage}],
+         artifacts: {overlay: {bucket, key}, signal: {bucket, key},
+                     refusal_preview: {bucket, key} | null},
+         refusal_region_px}
+
+    `interpretation`: ``{status, warnings, error, meta}``; o resultado clínico vai para `Report`.
+
+    `test_scenario`: ``{"read": {"scenario", "code"?}, "interpret": {...}}`` — repassado como
+    `mock` às lambdas (CONTRATO_LAMBDAS.md §4); só staff com ECG_TEST_SCENARIOS_ENABLED.
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     exam = models.ForeignKey(
@@ -78,24 +115,11 @@ class ExamAttempt(models.Model):
         default=ExamStatus.CRIADO,
     )
     imagem_s3_key = models.CharField(max_length=500)
-    image_type = models.CharField(max_length=100, null=True, blank=True)
+    layout = models.CharField(max_length=10, choices=EcgLayout.choices, default=EcgLayout.L3X4_1)
     calibracao = models.JSONField(null=True, blank=True)
-    mascara_s3_key = models.CharField(max_length=255, null=True, blank=True)
-    overlay_trace_s3_key = models.CharField(max_length=255, null=True, blank=True)
-    overlay_signal_s3_key = models.CharField(max_length=255, null=True, blank=True)
-    # sinais precisa sobreviver até a Fase B (lambda-3).
-    sinais = models.JSONField(null=True, blank=True)
-    lead_labels = models.JSONField(null=True, blank=True)
-    rhythm_index = models.IntegerField(null=True, blank=True)
-    # A lambda-2 retorna o veredito global da extração ("bom"/"parcial"/"ruim"),
-    # não um float — ver lambda_2_signal_extraction/handler.py:117,152.
-    fidelidade = models.CharField(
-        max_length=20,
-        choices=FidelityVerdict.choices,
-        null=True,
-        blank=True,
-    )
-    fidelidade_por_derivacao = models.JSONField(null=True, blank=True)
+    reading = models.JSONField(null=True, blank=True)
+    interpretation = models.JSONField(null=True, blank=True)
+    test_scenario = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -107,30 +131,21 @@ class ExamAttempt(models.Model):
 
 
 class Report(models.Model):
-    """Resultado da lambda-3, 1:1 com a tentativa que o gerou."""
+    """Resultado da interpretação (CONTRATO_LAMBDAS.md §3.2), 1:1 com a tentativa."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     attempt = models.OneToOneField(
         ExamAttempt, on_delete=models.CASCADE, related_name="report"
     )
-    # A lambda-3 devolve `ritmo` como dict (ver handler.py:60-61) — portanto
-    # JSONField, não string.
-    ritmo = models.JSONField(null=True, blank=True)
-    eixo_graus = models.FloatField(null=True, blank=True)
-    sokolow_mm = models.FloatField(null=True, blank=True)
-    derivacoes = models.JSONField(null=True, blank=True)
-    indicadores = models.JSONField(null=True, blank=True)
-    achados = models.JSONField(null=True, blank=True)
-    conclusao = models.TextField(null=True, blank=True)
-    # A lambda-3 devolve o veredito de fidelidade ("bom"/"parcial"/"ruim") como
-    # `confiabilidade` (interpretation.py:206-209) — string, não float.
-    confiabilidade = models.CharField(
-        max_length=20,
-        choices=FidelityVerdict.choices,
-        null=True,
-        blank=True,
+    classification = models.CharField(
+        max_length=20, choices=Classification.choices, null=True, blank=True
     )
-    versao_codigo = models.CharField(max_length=100, null=True, blank=True)
+    summary = models.JSONField(null=True, blank=True)
+    details = models.JSONField(null=True, blank=True)
+    disclaimer = models.TextField(blank=True, default="")
+    warnings = models.JSONField(default=list, blank=True)
+    engine = models.CharField(max_length=100, blank=True, default="")
+    engine_version = models.CharField(max_length=100, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -1,0 +1,18 @@
+# Etapa Test do pipeline: migrations em dia e testes do Django (as lambdas são testadas no ecg-lambdas-v1).
+version: 0.2
+
+env:
+  variables:
+    DEBUG: "True"
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - python -m pip install --quiet -r requirements.txt
+  build:
+    commands:
+      - python manage.py makemigrations --check --dry-run
+      - python manage.py test

@@ -680,7 +680,7 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 >    - Bucket de artefatos do pipeline `ecg-backend-pipeline-<account_id>` (bloqueio público, SSE-S3, lifecycle
 >      apagando objetos após 30 dias).
 >    - CodePipeline **V2**, modo `QUEUED`. Stages: Source (duas ações: `tl-gmiler/ecg-backend` e
->      `tl-gmiler/leitor-ecg`, branch `main`, artefatos `backend` e `frontend`; gatilho em push na `main` de
+>      `trustedlake/leitor-ecg` (conexão própria, `ecg-github-frontend`), branch `main`, artefatos `backend` e `frontend`; gatilho em push na `main` de
 >      qualquer um) → Test → Build → Deploy.
 >    - Notificação de falha do pipeline no SNS `ecg-alerts` (regra do EventBridge).
 > 4. Remover `.github/workflows/docker-publish.yml` (o CI/CD passa a ser na AWS) — mencione no relatório.
@@ -740,8 +740,9 @@ Checklist (não é prompt para agente rodar sozinho):
 2. `terraform -chdir=infra/aws apply` (revisar o plan antes; o RDS leva ~10 min) → anotar `api_url`. O serviço
    sobe com a imagem `bootstrap`, que ainda não existe: ele fica tentando até o primeiro deploy do pipeline
    (esperado; o circuit breaker não age antes do primeiro deploy).
-3. Gus: autorizar a conexão do GitHub no console (CodePipeline → Settings → Connections) e confirmar a assinatura
-   do e-mail do SNS.
+3. Gus: autorizar as duas conexões do GitHub no console (CodePipeline → Settings → Connections): `ecg-github`
+   na conta `tl-gmiler` (backend) e `ecg-github-frontend` na conta `trustedlake` (o `leitor-ecg` foi transferido
+   para lá); e confirmar a assinatura do e-mail do SNS.
 4. Aplicar a mudança de CORS do bucket de imagens no repo `ecg-lambdas` (relatório da I2) — só para o upload pela
    web; o Expo Go nativo não precisa de CORS.
 5. Merge das branches na `main` dos dois repos (PRs revisados) → pipeline roda sozinho (migrate + `ensure_admin`).

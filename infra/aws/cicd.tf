@@ -1,7 +1,8 @@
 # CI/CD na AWS: CodePipeline V2 (QUEUED) com duas fontes GitHub → CodeBuild ARM test → build → deploy.
 # Buildspecs e deploy em ci/. A conexão do GitHub nasce PENDENTE: autorizar no console (ver README).
 
-variable "github_owner" {
+# Cada conta do GitHub precisa da sua própria conexão (uma conexão = uma instalação do app da AWS).
+variable "backend_owner" {
   type    = string
   default = "tl-gmiler"
 }
@@ -9,6 +10,11 @@ variable "github_owner" {
 variable "backend_repo" {
   type    = string
   default = "ecg-backend"
+}
+
+variable "frontend_owner" {
+  type    = string
+  default = "trustedlake"
 }
 
 variable "frontend_repo" {
@@ -23,6 +29,11 @@ variable "pipeline_branch" {
 
 resource "aws_codestarconnections_connection" "github" {
   name          = "ecg-github"
+  provider_type = "GitHub"
+}
+
+resource "aws_codestarconnections_connection" "github_frontend" {
+  name          = "ecg-github-frontend"
   provider_type = "GitHub"
 }
 
@@ -298,7 +309,7 @@ data "aws_iam_policy_document" "codepipeline" {
   statement {
     sid       = "GitHub"
     actions   = ["codestar-connections:UseConnection", "codeconnections:UseConnection"]
-    resources = [aws_codestarconnections_connection.github.arn]
+    resources = [aws_codestarconnections_connection.github.arn, aws_codestarconnections_connection.github_frontend.arn]
   }
 
   statement {
@@ -338,7 +349,7 @@ resource "aws_codepipeline" "this" {
       output_artifacts = ["backend"]
       configuration = {
         ConnectionArn    = aws_codestarconnections_connection.github.arn
-        FullRepositoryId = "${var.github_owner}/${var.backend_repo}"
+        FullRepositoryId = "${var.backend_owner}/${var.backend_repo}"
         BranchName       = var.pipeline_branch
       }
     }
@@ -352,8 +363,8 @@ resource "aws_codepipeline" "this" {
       version          = "1"
       output_artifacts = ["frontend"]
       configuration = {
-        ConnectionArn    = aws_codestarconnections_connection.github.arn
-        FullRepositoryId = "${var.github_owner}/${var.frontend_repo}"
+        ConnectionArn    = aws_codestarconnections_connection.github_frontend.arn
+        FullRepositoryId = "${var.frontend_owner}/${var.frontend_repo}"
         BranchName       = var.pipeline_branch
       }
     }
@@ -515,6 +526,11 @@ output "pipeline_name" {
 }
 
 output "github_connection_arn" {
-  description = "Conexão PENDENTE até ser autorizada no console (Developer Tools > Connections)."
+  description = "Conexão do backend (conta tl-gmiler). PENDENTE até ser autorizada no console (Developer Tools > Connections)."
   value       = aws_codestarconnections_connection.github.arn
+}
+
+output "github_frontend_connection_arn" {
+  description = "Conexão do app (conta trustedlake). PENDENTE até ser autorizada no console por quem entra como trustedlake."
+  value       = aws_codestarconnections_connection.github_frontend.arn
 }

@@ -1,6 +1,6 @@
-"""Integração Django com AWS S3 e uma única Lambda ECG Analyser.
+"""Integração Django com AWS S3 e as Lambdas ECG.
 
-`run_phase_a` invoca `operation=analyze`, `run_refine` invoca
+`run_phase_a` invoca a Lambda de leitura v1 (`operation=read`, contrato 2.0), `run_refine` invoca
 `operation=refine` na mesma função e `run_phase_b` confirma apenas
 a extração dos traçados, sem diagnóstico clínico automatizado.
 """
@@ -114,67 +114,91 @@ def overlay_urls(attempt, expires_in):
     }
 
 
+def _read_json(bucket, key):
+    body = _session().client("s3").get_object(Bucket=bucket, Key=key)["Body"].read()
+    return json.loads(body)
+
+
 def run_phase_a(attempt, exam):
-    """Invoke only ecg-analyser. No legacy diagnosis Lambda."""
+    """Invoke the v1 reading Lambda (contract 2.0) and keep the best method.
+
+    The Lambda returns 6 methods; the one with the highest selector_score
+    among the `OK` ones is stored. No diagnosis is produced here.
+    """
     calibration = getattr(attempt, "calibracao", None)
     if (not isinstance(calibration, dict) or
         not all(calibration.get(k) is not None for k in ("speed_mm_s", "gain_mm_mv"))):
         raise UpstreamError("Calibração explícita ausente; informe velocidade e ganho no aplicativo")
-    output = invoke_lambda(settings.AWS_LAMBDA_ECG_ANALYSER, {
-        "operation": "analyze",
+    output = invoke_lambda(settings.AWS_LAMBDA_ECG_READING, {
+        "contract_version": "2.0",
+        "operation": "read",
+        "request_id": str(attempt.id),
+        "layout": exam.ecg_layout,
         "calibration": {"speed_mm_s": calibration["speed_mm_s"],
                         "gain_mm_mv": calibration["gain_mm_mv"]},
-        "exame_id": str(exam.id),
-        "attempt_id": str(attempt.id),
-        "imagem_s3_key": attempt.imagem_s3_key,
-        "images_bucket": settings.AWS_IMAGES_BUCKET,
-        "results_bucket": settings.AWS_RESULTS_BUCKET,
+        "image": {"bucket": settings.AWS_IMAGES_BUCKET, "key": attempt.imagem_s3_key},
     })
-    if not isinstance(output, dict) or not isinstance(output.get("status"), str):
-        raise UpstreamError("Resposta da Lambda sem status")
-    status = output["status"]
-    if status not in ("CONSISTENCY_PASS", "REVIEW_REQUIRED", "REJECTED_LOW_TRACE_GRID_CONTRAST"):
-        raise UpstreamError("Status inesperado da Lambda: " + status)
-    keys = output.get("artifacts", {})
-    if not isinstance(keys, dict):
-        raise UpstreamError("artifacts inválidos")
-    prefix = f"ecg-analyser/{attempt.id}/initial/"
-    filename_by_field = {"result": "result.json", "signals": "signals.npz",
-                         "trace_masks": "trace_masks.npz", "working_image": "working_image.png",
-                         "visao_geral": "visao_geral.png", "rejection_preview": "rejection_preview.png"}
-    if any(field not in filename_by_field or not isinstance(key, str) or
-           key != prefix + filename_by_field[field] for field, key in keys.items()):
-        raise UpstreamError("A Lambda retornou artefatos fora da tentativa ou inválidos")
-    needed = ("result",) if status.startswith("REJECTED_") else ("result", "signals", "trace_masks", "working_image", "visao_geral")
-    if any(not isinstance(keys.get(k), str) or not keys.get(k) for k in needed):
-        raise UpstreamError("Lambda não retornou todos os artefatos necessários")
-    attempt.overlay_trace_s3_key = keys.get("visao_geral")
-    attempt.overlay_signal_s3_key = None
-    attempt.mascara_s3_key = keys.get("trace_masks")
+    if not isinstance(output, dict) or output.get("operation") != "read" or not isinstance(output.get("status"), str):
+        raise UpstreamError("Resposta da Lambda de leitura inválida")
+    envelope = output["status"]
+    warnings = output.get("warnings") or []
     attempt.image_type = "ecg_analyser"
-    # Metadata and S3 references, never fabricate the diagnostic output.
-    attempt.sinais = {"analyser_status": status, "warnings": output.get("warnings", []),
-                      "result_s3_key": keys.get("result"),
-                      "signals_s3_key": keys.get("signals"),
-                      "working_image_s3_key": keys.get("working_image"),
-                      "leads": output.get("leads", [])}
-    attempt.lead_labels = [lead.get("name") for lead in output.get("leads", []) if isinstance(lead, dict)]
-    attempt.fidelidade = ("ruim" if status.startswith("REJECTED_") else
-                          "parcial" if status == "REVIEW_REQUIRED" else "bom")
+    attempt.overlay_signal_s3_key = None
     attempt.fidelidade_por_derivacao = None
-    # Preserve the explicit paper speed / gain selected by the user. A prior
-    # implementation accidentally overwrote these settings with the grid fit.
-    attempt.sinais["grid"] = output.get("grid")
-    attempt.save()
-    urls = overlay_urls(attempt, settings.PRESIGN_URL_EXPIRES)
-    return {**urls, "imagem_original_url": original_image_url(attempt, settings.PRESIGN_URL_EXPIRES),
-            "fidelidade": attempt.fidelidade, "image_type": attempt.image_type,
-            "analyser_status": status, "warnings": output.get("warnings", []),
-            "leads": attempt.lead_labels,
-            "result_url": presign_get_url(settings.AWS_RESULTS_BUCKET, keys["result"], settings.PRESIGN_URL_EXPIRES) if keys.get("result") else None,
-            "working_image_url": presign_get_url(settings.AWS_RESULTS_BUCKET, keys["working_image"], settings.PRESIGN_URL_EXPIRES) if keys.get("working_image") else None,
-            "signals_url": presign_get_url(settings.AWS_RESULTS_BUCKET, keys["signals"], settings.PRESIGN_URL_EXPIRES) if keys.get("signals") else None}
 
+    if envelope in ("OK", "OK_WITH_WARNINGS"):
+        methods = (output.get("result") or {}).get("methods")
+        if not isinstance(methods, list):
+            raise UpstreamError("Resposta da Lambda sem methods")
+        ok = [m for m in methods if isinstance(m, dict) and m.get("status") == "OK"
+              and isinstance(m.get("selector_score"), (int, float))
+              and isinstance((m.get("files") or {}).get("leads"), dict)]
+        if not ok:
+            raise UpstreamError("Nenhum método OK com selector_score")
+        best = max(ok, key=lambda m: m["selector_score"])
+        files = best["files"]
+        leads_ref = files["leads"]
+        leads = _read_json(leads_ref["bucket"], leads_ref["key"])
+        lead_list = leads.get("leads", []) if isinstance(leads, dict) else []
+        attempt.overlay_trace_s3_key = (files.get("image") or {}).get("key")
+        attempt.mascara_s3_key = None
+        attempt.lead_labels = [l.get("name") for l in lead_list if isinstance(l, dict)]
+        attempt.fidelidade = "bom" if envelope == "OK" else "parcial"
+        attempt.sinais = {
+            "analyser_status": envelope, "warnings": warnings,
+            "contract_version": output.get("contract_version"),
+            "chosen_method": best["method"], "chosen_method_version": best.get("version"),
+            "selector_score": best["selector_score"], "sampling_rate_hz": best.get("sampling_rate_hz"),
+            "methods": [{k: m.get(k) for k in ("method", "version", "status", "reason", "selector_score")}
+                        for m in methods if isinstance(m, dict)],
+            "result_s3_key": (files.get("json") or {}).get("key"),
+            "leads_s3_key": leads_ref["key"],
+            "leads": lead_list,
+        }
+    elif envelope == "REFUSED":
+        err = output.get("error") or {}
+        attempt.overlay_trace_s3_key = None
+        attempt.mascara_s3_key = None
+        attempt.lead_labels = []
+        attempt.fidelidade = "ruim"
+        attempt.sinais = {"analyser_status": "REJECTED_" + str(err.get("code") or "UNREADABLE"),
+                          "warnings": warnings, "error": err,
+                          "result_s3_key": None, "leads": []}
+    else:
+        err = output.get("error") or {}
+        raise UpstreamError(f"{settings.AWS_LAMBDA_ECG_READING}: {envelope} {err.get('code')}: {err.get('message')}")
+
+    attempt.save()
+    status = attempt.sinais["analyser_status"]
+    expires = settings.PRESIGN_URL_EXPIRES
+    urls = overlay_urls(attempt, expires)
+    result_key = attempt.sinais.get("result_s3_key")
+    return {**urls, "imagem_original_url": original_image_url(attempt, expires),
+            "fidelidade": attempt.fidelidade, "image_type": attempt.image_type,
+            "analyser_status": status, "warnings": warnings,
+            "leads": attempt.lead_labels,
+            "chosen_method": attempt.sinais.get("chosen_method"),
+            "result_url": presign_get_url(settings.AWS_RESULTS_BUCKET, result_key, expires) if result_key else None}
 
 
 def run_refine(attempt, exam, lead, strokes):

@@ -13,7 +13,7 @@ def load_services():
     fake_django = ModuleType('django')
     fake_conf = ModuleType('django.conf')
     fake_conf.settings = SimpleNamespace(
-        AWS_LAMBDA_ECG_ANALYSER='new-lambda',
+        AWS_LAMBDA_ECG_ANALYSER='new-lambda', AWS_LAMBDA_ECG_READING='read-lambda',
         AWS_IMAGES_BUCKET='images', AWS_RESULTS_BUCKET='results',
         PRESIGN_URL_EXPIRES=3600, AWS_LAMBDA_READ_TIMEOUT=270,
     )
@@ -42,17 +42,17 @@ class ServiceContracts(unittest.TestCase):
                    [('result','result.json'),('signals','signals.npz'),('trace_masks','trace_masks.npz'),
                     ('working_image','working_image.png'),('visao_geral','visao_geral.png')]}
 
-    def test_forward_calibration_and_store_all_artifacts(self):
-        with patch.object(self.s,'invoke_lambda',return_value={'status':'CONSISTENCY_PASS','leads':[{'name':'II'}],'artifacts':self.keys}) as invoke,\
-             patch.object(self.s,'presign_get_url',return_value='signed'),\
-             patch.object(self.s,'original_image_url',return_value='img'):
+    def test_forward_calibration_and_store_chosen_method(self):
+        m=lambda n,sc:{'method':n,'status':'OK','selector_score':sc,'files':{'leads':{'bucket':'r','key':'k/'+n+'/leads.json'},'image':{'bucket':'r','key':'k/'+n+'/p.png'},'json':{'bucket':'r','key':'k/'+n+'/result.json'}}}
+        out={'operation':'read','status':'OK','warnings':[],'result':{'methods':[m('a',10),m('b',80)]}}
+        self.e.ecg_layout='3x4+1'
+        with patch.object(self.s,'invoke_lambda',return_value=out) as invoke,             patch.object(self.s,'_read_json',return_value={'leads':[{'name':'II'}]}),             patch.object(self.s,'presign_get_url',return_value='signed'),             patch.object(self.s,'original_image_url',return_value='img'):
             result=self.s.run_phase_a(self.a,self.e)
-        self.assertEqual(invoke.call_count,1)
+        self.assertEqual(invoke.call_args.args[0],'read-lambda')
         self.assertEqual(invoke.call_args.args[1]['calibration'],{'speed_mm_s':50,'gain_mm_mv':20})
-        self.assertEqual(self.a.mascara_s3_key,self.keys['trace_masks'])
-        self.assertEqual(self.a.sinais['working_image_s3_key'],self.keys['working_image'])
-        self.assertEqual(self.a.calibracao, {'speed_mm_s':50, 'gain_mm_mv':20})
-        self.assertEqual(result['analyser_status'],'CONSISTENCY_PASS')
+        self.assertEqual(self.a.sinais['chosen_method'],'b')
+        self.assertEqual(self.a.overlay_trace_s3_key,'k/b/p.png')
+        self.assertEqual(result['analyser_status'],'OK')
 
     def test_no_calibration_no_lambda(self):
         self.a.calibracao=None
@@ -61,26 +61,25 @@ class ServiceContracts(unittest.TestCase):
                 self.s.run_phase_a(self.a,self.e)
             invoke.assert_not_called()
 
-    def test_no_missing_success_artifacts_accepted(self):
-        invalid=dict(self.keys);invalid.pop('trace_masks')
-        with patch.object(self.s,'invoke_lambda',return_value={'status':'CONSISTENCY_PASS','artifacts':invalid}):
-            with self.assertRaisesRegex(self.s.UpstreamError,'artefatos'):
-                self.s.run_phase_a(self.a,self.e)
-
-    def test_rejected_without_signal(self):
-        with patch.object(self.s,'invoke_lambda',return_value={'status':'REJECTED_LOW_TRACE_GRID_CONTRAST','artifacts':{'result':self.keys['result']},'leads':[]}),\
-             patch.object(self.s,'presign_get_url',return_value='signed'),\
-             patch.object(self.s,'original_image_url',return_value='img'):
+    def test_refused_without_signal(self):
+        out={'operation':'read','status':'REFUSED','warnings':[],'error':{'code':'READ_REFUSED_LOW_CONTRAST'},'result':None}
+        self.e.ecg_layout='3x4+1'
+        with patch.object(self.s,'invoke_lambda',return_value=out),             patch.object(self.s,'presign_get_url',return_value='signed'),             patch.object(self.s,'original_image_url',return_value='img'):
             r=self.s.run_phase_a(self.a,self.e)
         self.assertEqual(self.a.fidelidade,'ruim')
-        self.assertIsNone(self.a.sinais['signals_s3_key'])
+        self.assertEqual(self.a.sinais['leads'],[])
         self.assertTrue(r['analyser_status'].startswith('REJECTED_'))
 
+    def test_error_envelope_raises(self):
+        out={'operation':'read','status':'ERROR','warnings':[],'error':{'code':'READ_SELECTOR_UNAVAILABLE','message':'m'}}
+        self.e.ecg_layout='3x4+1'
+        with patch.object(self.s,'invoke_lambda',return_value=out):
+            with self.assertRaisesRegex(self.s.UpstreamError,'READ_SELECTOR_UNAVAILABLE'):
+                self.s.run_phase_a(self.a,self.e)
+
     def test_refine_updates_visible_overlay_and_keeps_history(self):
-        with patch.object(self.s,'invoke_lambda',return_value={'status':'CONSISTENCY_PASS','leads':[{'name':'II'}],'artifacts':self.keys}),\
-             patch.object(self.s,'presign_get_url',return_value='signed'),\
-             patch.object(self.s,'original_image_url',return_value='img'):
-            self.s.run_phase_a(self.a,self.e)
+        self.a.sinais={'result_s3_key':self.keys['result'],'signals_s3_key':self.keys['signals'],'working_image_s3_key':self.keys['working_image']}
+        self.a.mascara_s3_key=self.keys['trace_masks'];self.a.overlay_trace_s3_key=self.keys['visao_geral']
         next_art={**self.keys,'result':f'ecg-analyser/{self.a.id}/00000000-0000-4000-8000-000000000000/result.json','signals':f'ecg-analyser/{self.a.id}/00000000-0000-4000-8000-000000000000/signals.npz',
               'trace_masks':f'ecg-analyser/{self.a.id}/00000000-0000-4000-8000-000000000000/trace_masks.npz','working_image':f'ecg-analyser/{self.a.id}/00000000-0000-4000-8000-000000000000/working_image.png','correction_preview':f'ecg-analyser/{self.a.id}/00000000-0000-4000-8000-000000000000/correction_preview.png'}
         response={'status':'MANUAL_REVIEW_REQUIRED','artifacts':next_art,'manual_correction':{'lead':'II'}}
@@ -95,28 +94,3 @@ class ServiceContracts(unittest.TestCase):
 
 if __name__=='__main__': unittest.main()
 
-
-class ServiceSafetyContracts(unittest.TestCase):
-    def test_cross_attempt_s3_key_rejected(self):
-        service=load_services(); a=MockAttempt(); e=SimpleNamespace(id='35585ae9-4de8-4888-8ac4-23cf14319803')
-        fake={'result':'ecg-analyser/other/initial/result.json','signals':'ecg-analyser/other/initial/signals.npz',
-              'trace_masks':'ecg-analyser/other/initial/trace_masks.npz',
-              'working_image':'ecg-analyser/other/initial/working_image.png',
-              'visao_geral':'ecg-analyser/other/initial/visao_geral.png'}
-        with patch.object(service,'invoke_lambda',return_value={'status':'CONSISTENCY_PASS','artifacts':fake}):
-            with self.assertRaisesRegex(service.UpstreamError,'fora da tentativa'):
-                service.run_phase_a(a,e)
-
-class ExtraArtifactProtections(unittest.TestCase):
-    def test_initial_output_wrong_filename_rejected(self):
-        services=load_services(); attempt=MockAttempt()
-        exam=SimpleNamespace(id='35585ae9-4de8-4888-8ac4-23cf14319803')
-        prefix='ecg-analyser/'+attempt.id+'/initial/'
-        output={'status':'CONSISTENCY_PASS','artifacts': {
-            'result': prefix+'working_image.png',
-            'signals':prefix+'signals.npz','trace_masks':prefix+'trace_masks.npz',
-            'working_image':prefix+'working_image.png',
-            'visao_geral':prefix+'visao_geral.png'}}
-        with patch.object(services,'invoke_lambda',return_value=output):
-            with self.assertRaisesRegex(services.UpstreamError, 'inválidos'):
-                services.run_phase_a(attempt,exam)

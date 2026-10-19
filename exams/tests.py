@@ -6,6 +6,7 @@ verdade Ã© coberto por smoke manual (ver README). O teste espelha o mapeamento
 campo-a-campo usado em produÃ§Ã£o (mesmos nomes dos handlers).
 """
 
+import unittest
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -48,12 +49,38 @@ LAMBDA_REFINE_OUT = {
 }
 
 
+def _file(name, ctype="application/json"):
+    return {"bucket": "res", "key": "reading/{A}/run/m/" + name, "content_type": ctype}
+
+
+def _method(name, status, score):
+    ok = status == "OK"
+    return {"method": name, "version": "v", "status": status, "reason": None if ok else "x",
+            "selector_score": score if ok else None, "sampling_rate_hz": 200.0,
+            "files": {"json": _file("result.json"), "image": _file("preview.png", "image/png"),
+                      "leads": _file("leads.json")}}
+
+
+LAMBDA_READ_OUT = {
+    "contract_version": "2.0", "operation": "read", "status": "OK_WITH_WARNINGS",
+    "warnings": [{"code": "METHODS_PARTIAL_RESULT", "message": "m"}], "error": None,
+    "result": {"methods": [_method("a", "OK", 60.0), _method("b", "OK", 90.0), _method("c", "BLOCKED", None)]},
+}
+
+LAMBDA_READ_REFUSED = {
+    "contract_version": "2.0", "operation": "read", "status": "REFUSED", "warnings": [],
+    "error": {"code": "READ_REFUSED_LOW_CONTRAST", "message": "m"}, "result": None,
+}
+
+LEADS_JSON = {"leads": [{"name": "I"}, {"name": "II"}]}
+
+
 def lambda_fake(**outputs):
     """Fake invoke_lambda: answers per operation, with keys under the real attempt id."""
     import json
     def fake(function_name, payload):
         out = outputs[payload["operation"]]
-        return json.loads(json.dumps(out).replace("{A}", payload["attempt_id"]))
+        return json.loads(json.dumps(out).replace("{A}", payload.get("attempt_id") or payload["request_id"]))
     return fake
 
 
@@ -165,44 +192,52 @@ class AttemptFlowTest(BaseAPITestCase):
         self._refine_url = reverse("attempt-refine", args=[self.exam.id, self.attempt.id])
         self._approve_url = reverse("attempt-aprovar", args=[self.exam.id, self.attempt.id])
 
+    @mock.patch("exams.services._read_json", return_value=LEADS_JSON)
     @mock.patch("exams.services.presign_get_url", return_value="https://signed")
-    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(analyze=LAMBDA_ANALYZE_OUT))
-    def test_one_lambda_analyze_stores_artifacts(self, invoke, signed):
+    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(read=LAMBDA_READ_OUT))
+    def test_read_lambda_picks_highest_selector_score(self, invoke, signed, _leads):
         response=self.client.post(self._process_url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(invoke.call_count, 1)
-        self.assertEqual(invoke.call_args.args[1]["operation"], "analyze")
-        self.assertEqual(invoke.call_args.args[1]["calibration"]["speed_mm_s"], 25)
+        payload = invoke.call_args.args[1]
+        self.assertEqual(invoke.call_args.args[0], "ecg-reading")
+        self.assertEqual(payload["operation"], "read")
+        self.assertEqual(payload["layout"], "3x4+1")
+        self.assertEqual(payload["calibration"]["speed_mm_s"], 25)
         self.attempt.refresh_from_db()
         self.assertEqual(self.attempt.status, ExamStatus.AGUARDANDO_APROVACAO)
-        self.assertEqual(self.attempt.sinais["analyser_status"], "CONSISTENCY_PASS")
-        self.assertEqual(self.attempt.mascara_s3_key, real_keys(LAMBDA_ANALYZE_OUT["artifacts"], self.attempt)["trace_masks"])
+        self.assertEqual(self.attempt.sinais["analyser_status"], "OK_WITH_WARNINGS")
+        self.assertEqual(self.attempt.sinais["chosen_method"], "b")
+        self.assertEqual(self.attempt.lead_labels, ["I", "II"])
+        self.assertTrue(self.attempt.overlay_trace_s3_key.endswith("preview.png"))
 
     @mock.patch("exams.services.presign_get_url", return_value="https://signed")
-    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(analyze=LAMBDA_REJECTED_OUT))
+    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(read=LAMBDA_READ_REFUSED))
     def test_rejection_does_not_export_signals(self, invoke, signed):
         response=self.client.post(self._process_url)
         self.assertEqual(response.status_code, 200)
         self.attempt.refresh_from_db()
         self.assertEqual(self.attempt.status, ExamStatus.REJEITADO)
-        self.assertIsNone(self.attempt.sinais["signals_s3_key"])
+        self.assertEqual(self.attempt.sinais["leads"], [])
         self.assertEqual(self.client.post(self._approve_url).status_code, 409)
         refine_body = {"coordinate_system": "normalized_image_v1", "lead": "II", "strokes": [
             {"lead": "II", "mode": "include", "points": [{"x": 0.2, "y": 0.2}]}]}
         self.assertEqual(self.client.post(self._refine_url, refine_body, format="json").status_code, 409)
 
+    @mock.patch("exams.services._read_json", return_value=LEADS_JSON)
     @mock.patch("exams.services.presign_get_url", return_value="https://signed")
-    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(analyze=LAMBDA_ANALYZE_OUT))
-    def test_get_state_does_not_invoke_lambda_twice(self, invoke, signed):
+    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(read=LAMBDA_READ_OUT))
+    def test_get_state_does_not_invoke_lambda_twice(self, invoke, signed, _leads):
         self.client.post(self._process_url)
         response=self.client.get(self._process_url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"],ExamStatus.AGUARDANDO_APROVACAO)
-        self.assertEqual(response.data["working_image_url"],"https://signed")
+        self.assertEqual(response.data["result_url"],"https://signed")
         self.assertEqual(invoke.call_count,1)
 
+    @unittest.skip("v1 reading Lambda has no refine operation yet")
     @mock.patch("exams.services.presign_get_url", return_value="https://signed")
-    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(analyze=LAMBDA_ANALYZE_OUT, refine=LAMBDA_REFINE_OUT))
+    @mock.patch("exams.services.invoke_lambda", side_effect=lambda_fake(refine=LAMBDA_REFINE_OUT))
     def test_manual_paint_saves_new_version(self, invoke, signed):
         self.assertEqual(self.client.post(self._process_url).status_code,200)
         response=self.client.post(self._refine_url,{

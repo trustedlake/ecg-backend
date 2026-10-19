@@ -179,12 +179,14 @@ AWS_RESULTS_BUCKET = env(
 )
 # Single Lambda responsible for ECG pixel extraction.
 AWS_LAMBDA_ECG_ANALYSER = env("AWS_LAMBDA_ECG_ANALYSER", default="ecg-analyser")
+# v1 reading Lambda (contract 2.0, timeout 900s).
+AWS_LAMBDA_ECG_READING = env("AWS_LAMBDA_ECG_READING", default="ecg-reading")
 PRESIGN_URL_EXPIRES = env.int("PRESIGN_URL_EXPIRES", default=3600)
 
-# Must exceed the configured analyser Lambda timeout (recommended 240s).
-AWS_LAMBDA_READ_TIMEOUT = env.int("AWS_LAMBDA_READ_TIMEOUT", default=270)
+# Must exceed the reading Lambda timeout (900s).
+AWS_LAMBDA_READ_TIMEOUT = env.int("AWS_LAMBDA_READ_TIMEOUT", default=930)
 
 # An attempt stuck in "fase_a_processando" longer than this (seconds) is considered
 # interrupted (e.g. Django restarted during the Lambda call). Must exceed the gunicorn
-# timeout (360s) so a call still in flight is never recovered by mistake.
-STALE_PROCESSING_SECONDS = env.int("STALE_PROCESSING_SECONDS", default=600)
+# timeout (960s) so a call still in flight is never recovered by mistake.
+STALE_PROCESSING_SECONDS = env.int("STALE_PROCESSING_SECONDS", default=1200)

@@ -47,3 +47,9 @@ mock_lambdas/infra/*.tfstate*
 
 # Export web do Expo (gerado no build da imagem)
 frontend_dist
+
+# infra/aws (produção)
+infra/aws/.terraform/
+infra/aws/*.tfstate*
+infra/aws/*.plan
+infra/aws/*.tfvars

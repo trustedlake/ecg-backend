@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import services, tasks
-from .models import EcgLayout, Exam, ExamAttempt, ExamStatus
+from .models import SUPPORTED_LAYOUTS, Exam, ExamAttempt, ExamStatus
 from .serializers import (
     GAIN_CHOICES,
     SPEED_CHOICES,
@@ -221,7 +221,7 @@ class ConfigView(APIView):
 
     def get(self, request):
         return Response({
-            "layouts": list(EcgLayout.values),
+            "layouts": [layout.value for layout in SUPPORTED_LAYOUTS],
             "calibration": {
                 "speed_mm_s": SPEED_CHOICES,
                 "gain_mm_mv": GAIN_CHOICES,

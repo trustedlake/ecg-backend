@@ -1,4 +1,8 @@
-"""Integração Django com AWS S3 e as lambdas do contrato v1 (CONTRATO_LAMBDAS.md).
+"""Integração Django com AWS S3 e as lambdas de ECG (tl-gmiler/ecg-lambdas-v1, CONTRATO_LAMBDAS.md).
+
+Leitura: `ecg-reading`, contrato 2.0 (seis métodos; o backend fica com o `OK` de maior
+`selector_score`). Interpretação: `ecg-interpretation` (mock), que recebe como `signal` o
+`leads.json` do método escolhido. Os cenários de teste são o campo `mock` do payload.
 
 - `invoke_contract` sempre devolve um envelope do contrato (falha de infraestrutura vira
   um envelope sintético `ERROR`/`INTERNAL_ERROR` retryable, nunca exceção).
@@ -24,7 +28,7 @@ from .models import Classification, Exam, ExamAttempt, ExamStatus, Report
 
 logger = logging.getLogger(__name__)
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "2.0"
 
 STATUS_OK = "OK"
 STATUS_OK_WITH_WARNINGS = "OK_WITH_WARNINGS"
@@ -33,6 +37,7 @@ STATUS_ERROR = "ERROR"
 SUCCESS_STATUSES = (STATUS_OK, STATUS_OK_WITH_WARNINGS)
 READ_STATUSES = (STATUS_OK, STATUS_OK_WITH_WARNINGS, STATUS_REFUSED, STATUS_ERROR)
 INTERPRET_STATUSES = (STATUS_OK, STATUS_OK_WITH_WARNINGS, STATUS_ERROR)
+METHOD_OK = "OK"
 
 # Erros que o próprio backend gera (sem resposta válida da lambda). Mesmos códigos do catálogo.
 LOCAL_ERRORS = {
@@ -40,6 +45,13 @@ LOCAL_ERRORS = {
     "STORAGE_ERROR": ("internal", True, "Falha ao ler os artefatos da leitura. Tente de novo em instantes."),
     "SEX_MISSING": ("validation", False, "Informe o sexo do paciente para interpretar o ECG."),
     "TASK_TIMEOUT": ("internal", True, "O processamento demorou mais que o esperado. Tente de novo."),
+}
+
+# Aviso que o backend acrescenta quando a lambda diz OK_WITH_WARNINGS sem aviso no método escolhido
+# (no contrato 2.0 isso significa que algum dos seis métodos não concluiu).
+METHODS_PARTIAL_WARNING = {
+    "code": "METHODS_PARTIAL_RESULT",
+    "message": "Nem todos os métodos de leitura concluíram; o traçado mostrado é o do método mais confiável.",
 }
 
 LOG_BODY_LIMIT = 2000
@@ -137,6 +149,10 @@ def _is_str(value):
     return isinstance(value, str) and value != ""
 
 
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _envelope_problem(body, operation, request_id):
     """Devolve o motivo de o envelope ser inválido, ou None se ele seguir o contrato §1.1."""
     if not isinstance(body, dict):
@@ -219,12 +235,19 @@ def _public_error(error):
 
 
 def _public_warnings(warnings):
-    out = []
-    for w in warnings or []:
+    """Avisos {code, message, lead?} sem repetição; itens fora do formato são descartados
+    (os avisos por método do contrato 2.0 não passam pela validação do envelope)."""
+    out, seen = [], set()
+    for w in warnings if isinstance(warnings, list) else []:
+        if not (isinstance(w, dict) and _is_str(w.get("code")) and isinstance(w.get("message"), str)):
+            continue
         item = {"code": w["code"], "message": w["message"]}
-        if w.get("lead"):
+        if _is_str(w.get("lead")):
             item["lead"] = w["lead"]
-        out.append(item)
+        key = (item["code"], item.get("lead"))
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
     return out
 
 
@@ -305,7 +328,7 @@ def recover_stale(attempt):
 
 
 def _artifact(ref, request_id):
-    """Valida um artefato {bucket, key} do contrato §2.3: bucket de resultados e prefixo da tentativa."""
+    """Valida um artefato {bucket, key} do contrato §3: bucket de resultados e prefixo da tentativa."""
     if not isinstance(ref, dict):
         return None
     bucket, key = ref.get("bucket"), ref.get("key")
@@ -366,8 +389,86 @@ def build_reading_payload(attempt):
     return payload
 
 
+def _methods_summary(methods):
+    """Resumo dos seis métodos (auditoria; não vai para a API)."""
+    return [
+        {k: m.get(k) for k in ("method", "version", "status", "reason", "selector_score")}
+        for m in methods if isinstance(m, dict)
+    ] if isinstance(methods, list) else []
+
+
+def _choose_method(methods, request_id):
+    """Método `OK` de maior `selector_score` com `files.leads` e `files.image` válidos (contrato §3).
+
+    Devolve (método, ref do leads.json, ref da imagem) ou None."""
+    best = None
+    for method in methods:
+        if not isinstance(method, dict) or method.get("status") != METHOD_OK:
+            continue
+        score = method.get("selector_score")
+        files = method.get("files") if isinstance(method.get("files"), dict) else {}
+        leads = _artifact(files.get("leads"), request_id)
+        image = _artifact(files.get("image"), request_id)
+        if not _is_number(score) or leads is None or image is None:
+            continue
+        if best is None or score > best[0]["selector_score"]:
+            best = (method, leads, image)
+    return best
+
+
+def _refusal_preview(details, request_id):
+    """Prévia da recusa: `details.preview` (formato antigo) ou a imagem de recusa do primeiro método."""
+    preview = _artifact(details.get("preview"), request_id)
+    if preview:
+        return preview
+    for method in details.get("methods") if isinstance(details.get("methods"), list) else []:
+        files = method.get("files") if isinstance(method, dict) and isinstance(method.get("files"), dict) else {}
+        preview = _artifact(files.get("image"), request_id)
+        if preview:
+            return preview
+    return None
+
+
+def _read_success(envelope, reading, request_id):
+    """Preenche `reading` a partir de uma leitura OK/OK_WITH_WARNINGS; devolve o bloco de erro
+    sintético se a resposta não for aproveitável."""
+    methods = envelope["result"].get("methods")
+    if not isinstance(methods, list):
+        return _reading_error(envelope, "INTERNAL_ERROR", request_id, "result.methods ausente")
+    chosen = _choose_method(methods, request_id)
+    if chosen is None:
+        return _reading_error(envelope, "INTERNAL_ERROR", request_id,
+                              f"nenhum método OK aproveitável: {_methods_summary(methods)!r}"[:LOG_BODY_LIMIT])
+    method, leads_ref, image_ref = chosen
+    try:
+        leads_doc = _read_json_from_s3(leads_ref["bucket"], leads_ref["key"])
+        leads = leads_doc.get("leads") if isinstance(leads_doc, dict) else None
+        if not isinstance(leads, list) or not all(isinstance(lead, dict) for lead in leads):
+            raise ValueError("leads.json sem lista de derivações")
+    except Exception:
+        logger.exception("Falha ao ler o leads.json %s da leitura %s", leads_ref, request_id)
+        return _reading_error(envelope, "STORAGE_ERROR", request_id, "leads.json ilegível")
+
+    warnings = _public_warnings((envelope.get("warnings") or []) + (method.get("warnings") or []))
+    if envelope["status"] == STATUS_OK_WITH_WARNINGS and not warnings:
+        warnings = [dict(METHODS_PARTIAL_WARNING)]
+    reading["warnings"] = warnings
+    # Resumo por derivação SEM `samples`: o sinal fica só no S3 (artifacts.signal).
+    reading["leads"] = [{k: lead.get(k) for k in ("name", "kind", "quality", "coverage")} for lead in leads]
+    reading["artifacts"]["overlay"] = image_ref
+    reading["artifacts"]["signal"] = leads_ref
+    reading["method"] = {
+        "name": method.get("method"),
+        "version": method.get("version"),
+        "selector_score": method["selector_score"],
+        "sampling_rate_hz": method.get("sampling_rate_hz"),
+    }
+    reading["methods"] = _methods_summary(methods)
+    return reading
+
+
 def run_reading(attempt):
-    """Fase de leitura (contrato §2). Grava `attempt.reading` e move para
+    """Fase de leitura (contrato 2.0). Grava `attempt.reading` e move para
     aguardando_validacao / leitura_recusada / erro_leitura. Devolve o status final."""
     request_id = str(attempt.id)
     envelope = invoke_contract(settings.AWS_LAMBDA_ECG_READING, build_reading_payload(attempt), "read")
@@ -375,24 +476,8 @@ def run_reading(attempt):
     reading = _empty_reading(envelope)
 
     if status in SUCCESS_STATUSES:
-        result = envelope["result"]
-        artifacts = result.get("artifacts") or {}
-        overlay = _artifact(artifacts.get("overlay"), request_id)
-        signal = _artifact(artifacts.get("signal"), request_id)
-        leads = result.get("leads")
-        if overlay is None or signal is None:
-            reading = _reading_error(envelope, "INTERNAL_ERROR", request_id,
-                                     f"artefatos fora do bucket/prefixo: {artifacts!r}"[:LOG_BODY_LIMIT])
-        elif not isinstance(leads, list) or not all(isinstance(lead, dict) for lead in leads):
-            reading = _reading_error(envelope, "INTERNAL_ERROR", request_id, "leads ausente")
-        else:
-            reading["grid"] = result.get("grid")
-            # Resumo por derivação SEM `samples`: o sinal fica só no S3 (artifacts.signal).
-            reading["leads"] = [
-                {k: lead.get(k) for k in ("name", "kind", "quality", "coverage")} for lead in leads
-            ]
-            reading["artifacts"]["overlay"] = overlay
-            reading["artifacts"]["signal"] = signal
+        reading = _read_success(envelope, reading, request_id)
+        if reading["error"] is None:
             _finish(attempt, "read", ExamStatus.AGUARDANDO_VALIDACAO, reading=reading)
             return attempt.status
 
@@ -400,14 +485,18 @@ def run_reading(attempt):
         error = envelope["error"]
         details = error.get("details") if isinstance(error.get("details"), dict) else {}
         reading["error"] = _public_error(error)
-        # A prévia é opcional no contrato (§6.3); fora do bucket/prefixo ela é descartada.
-        reading["artifacts"]["refusal_preview"] = _artifact(details.get("preview"), request_id)
+        # A prévia é opcional; fora do bucket/prefixo da tentativa ela é descartada.
+        reading["artifacts"]["refusal_preview"] = _refusal_preview(details, request_id)
         reading["refusal_region_px"] = _region_px(details.get("region_px"))
+        reading["methods"] = _methods_summary(details.get("methods"))
         _finish(attempt, "read", ExamStatus.LEITURA_RECUSADA, reading=reading)
         return attempt.status
 
     else:
-        reading["error"] = _public_error(envelope["error"])
+        error = envelope["error"]
+        details = error.get("details") if isinstance(error.get("details"), dict) else {}
+        reading["error"] = _public_error(error)
+        reading["methods"] = _methods_summary(details.get("methods"))
 
     _finish(attempt, "read", ExamStatus.ERRO_LEITURA, reading=reading)
     return attempt.status
@@ -442,9 +531,12 @@ def run_interpretation(attempt):
         envelope = _synthetic_envelope("interpret", request_id, "SEX_MISSING")
     else:
         try:
-            signal = _read_json_from_s3(signal_ref["bucket"], signal_ref["key"])
-            if not isinstance(signal, dict):
-                raise ValueError("signal.json não é objeto")
+            leads_doc = _read_json_from_s3(signal_ref["bucket"], signal_ref["key"])
+            if not isinstance(leads_doc, dict):
+                raise ValueError("leads.json não é objeto")
+            # O leads.json do contrato 2.0 não traz a taxa: ela vem do método escolhido (contrato §4).
+            signal = {"sampling_rate_hz": (reading.get("method") or {}).get("sampling_rate_hz"),
+                      "units": "mV", **leads_doc}
         except Exception:
             logger.exception("Falha ao baixar o sinal %s da tentativa %s", signal_ref, request_id)
             envelope = _synthetic_envelope("interpret", request_id, "STORAGE_ERROR")

@@ -20,25 +20,31 @@ from .models import Exam, ExamAttempt, ExamStatus, Patient
 
 User = get_user_model()
 RESULTS = settings.AWS_RESULTS_BUCKET
-SIGNAL = {"sampling_rate_hz": 500, "units": "mV", "leads": [{"name": "II", "samples": [0.0, 0.1]}]}
+# leads.json do método escolhido: sem sampling_rate_hz (vem do método) e com o resumo por derivação.
+SIGNAL = {"leads": [{"name": "II", "kind": "rhythm", "quality": "good", "coverage": 1.0, "samples": [0.0, 0.1]}]}
 
 
 def env(op, rid, status, result=None, error=None, warnings=None):
-    return {"contract_version": "1.0", "operation": op, "request_id": rid, "status": status,
-            "warnings": warnings or [], "error": error, "result": result,
-            "meta": {"engine": f"ecg-{op}-mock", "engine_version": "abc123"}}
+    body = {"contract_version": "2.0", "operation": op, "request_id": rid, "status": status,
+            "error": error, "result": result, "meta": {"engine": f"ecg-{op}", "engine_version": "abc123"}}
+    if warnings is not None:
+        body["warnings"] = warnings
+    return body
 
 
 def read_ok(rid, status="OK", warnings=None):
-    prefix = f"reading/{rid}/run1"
-    result = {
-        "layout": "3x4+1", "sampling_rate_hz": 500, "units": "mV", "grid": {"small_box_px": 5.9},
-        "leads": [{"name": "II", "kind": "rhythm", "quality": "good", "coverage": 1.0,
-                   "samples": [0.0, 0.1]}],
-        "artifacts": {"overlay": {"bucket": RESULTS, "key": f"{prefix}/overlay.png"},
-                      "signal": {"bucket": RESULTS, "key": f"{prefix}/signal.json"}},
+    """Leitura 2.0 com um único método OK; os avisos vêm no método (contrato §3)."""
+    prefix = f"reading/{rid}/run1/baseline_peaks"
+    method = {
+        "method": "baseline_peaks", "version": "v1", "status": "OK", "reason": None,
+        "selector_score": 87.5, "sampling_rate_hz": 150.0, "warnings": warnings or [],
+        "files": {"json": {"bucket": RESULTS, "key": f"{prefix}/result.json"},
+                  "image": {"bucket": RESULTS, "key": f"{prefix}/preview.png"},
+                  "leads": {"bucket": RESULTS, "key": f"{prefix}/leads.json"}},
     }
-    return env("read", rid, status, result=result, warnings=warnings)
+    result = {"layout": "3x4+1", "calibration": {"speed_mm_s": 25.0, "gain_mm_mv": 10.0},
+              "units": "mV", "methods": [method]}
+    return env("read", rid, status, result=result)
 
 
 def interp_ok(rid, status="OK", warnings=None):
@@ -119,7 +125,9 @@ class HappyPathTest(FlowTestCase):
             "id", "exam_id", "status", "layout", "calibration", "original_image_url", "reading",
             "interpretation", "can_retry", "needs_new_photo", "created_at", "updated_at"})
         self.assertEqual(data["calibration"], {"speed_mm_s": 25, "gain_mm_mv": 10})
-        self.assertEqual(data["reading"]["overlay_url"], f"https://signed/reading/{aid}/run1/overlay.png")
+        self.assertEqual(data["reading"]["overlay_url"],
+                         f"https://signed/reading/{aid}/run1/baseline_peaks/preview.png")
+        self.assertEqual(data["reading"]["leads"], [{"name": "II", "kind": "rhythm", "quality": "good", "coverage": 1.0}])
         self.assertTrue(data["original_image_url"].startswith("https://signed/"))
         self.assertIsNone(data["interpretation"])
         self.assertNotIn("samples", json.dumps(data))
@@ -134,6 +142,8 @@ class HappyPathTest(FlowTestCase):
         self.assertEqual((data["can_retry"], data["needs_new_photo"]), (False, False))
         self.assertEqual(self.exam_status(), ExamStatus.CONCLUIDO)
         self.assertEqual(self.calls[1][1]["patient"], {"sex": "F"})
+        # O leads.json vai como signal, com a taxa do método escolhido (contrato 2.0 §4).
+        self.assertEqual(self.calls[1][1]["signal"], {**SIGNAL, "sampling_rate_hz": 150.0, "units": "mV"})
 
         detail = self.client.get(reverse("exam-detail", args=[self.exam.id])).data
         self.assertEqual(detail["attempts"][0]["status"], ExamStatus.CONCLUIDO)
@@ -317,7 +327,7 @@ class ConfigHealthLoginTest(APITestCase):
 
     def test_config_shape(self):
         data = self._config()
-        self.assertEqual(data["layouts"], ["3x4", "3x4+1", "3x4+3", "6x2", "6x2+1", "12x1"])
+        self.assertEqual(data["layouts"], ["3x4+1", "12x1"])
         self.assertEqual(data["calibration"], {"speed_mm_s": [12.5, 25, 50], "gain_mm_mv": [5, 10, 20],
                                                "default": {"speed_mm_s": 25, "gain_mm_mv": 10}})
 

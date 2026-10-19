@@ -4,11 +4,15 @@ Long polling em `ECG_TASK_QUEUE_URL`. Cada mensagem `{"ecg_task", "attempt_id"}`
 `tasks.run_task` (que nunca levanta exceção) e só depois é apagada: se o container morrer no meio,
 a mensagem volta para a fila após o visibility timeout. Corpo inválido é logado e apagado.
 SIGTERM/SIGINT terminam a mensagem em andamento e saem com código 0 (stopTimeout do ECS: 120 s).
+`ECG_WORKER_CONCURRENCY` threads fazem o long polling em paralelo: a leitura real espera a lambda
+por 50–190 s e não pode segurar a fila inteira. Uma leitura cortada pelo stopTimeout volta para a
+fila depois do visibility timeout e é refeita.
 """
 
 import json
 import logging
 import signal
+import threading
 import time
 
 from django.conf import settings
@@ -103,4 +107,14 @@ class Command(BaseCommand):
         worker = Worker(settings.ECG_TASK_QUEUE_URL)
         signal.signal(signal.SIGTERM, worker.stop)
         signal.signal(signal.SIGINT, worker.stop)
-        worker.run()
+        concurrency = max(1, settings.ECG_WORKER_CONCURRENCY)
+        if concurrency == 1:
+            worker.run()
+            return
+        threads = [threading.Thread(target=worker.run, name=f"ecg-worker-{i}") for i in range(concurrency)]
+        for thread in threads:
+            thread.start()
+        # join com timeout: o sinal só é tratado na thread principal entre as esperas.
+        for thread in threads:
+            while thread.is_alive():
+                thread.join(1)

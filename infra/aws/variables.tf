@@ -28,13 +28,13 @@ variable "results_bucket" {
 
 variable "reading_lambda_name" {
   type        = string
-  description = "Lambda de leitura do contrato v1 (trocar mock por real = trocar aqui e na task)."
-  default     = "ecg-reading-mock"
+  description = "Lambda de leitura (contrato 2.0, ecg-lambdas-v1). Os cenários de teste vão no campo mock do payload."
+  default     = "ecg-reading"
 }
 
 variable "interpretation_lambda_name" {
   type    = string
-  default = "ecg-interpretation-mock"
+  default = "ecg-interpretation"
 }
 
 variable "ssm_prefix" {

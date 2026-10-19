@@ -1,7 +1,7 @@
-"""Testes do cliente do contrato v1 (exams/services.py).
+"""Testes do cliente das lambdas (exams/services.py): leitura 2.0 e interpretação.
 
-O cliente boto3 da lambda e a leitura do sinal no S3 são mockados; as fixtures seguem os
-exemplos do CONTRATO_LAMBDAS.md (§1.1, §2.3, §2.4, §3.2). Nenhum teste fala com a AWS.
+O cliente boto3 da lambda e a leitura do leads.json no S3 são mockados; as fixtures seguem os
+exemplos do CONTRATO_LAMBDAS.md do ecg-lambdas-v1 (§1, §3, §4). Nenhum teste fala com a AWS.
 """
 
 import io
@@ -22,32 +22,54 @@ RESULTS = settings.AWS_RESULTS_BUCKET
 
 
 def _envelope(operation, request_id, status, result=None, error=None, warnings=None):
-    return {
-        "contract_version": "1.0", "operation": operation, "request_id": request_id,
-        "status": status, "warnings": warnings or [], "error": error, "result": result,
-        "meta": {"engine": f"ecg-{operation}-mock", "engine_version": "abc123", "duration_ms": 10},
+    body = {
+        "contract_version": "2.0", "operation": operation, "request_id": request_id,
+        "status": status, "error": error, "result": result,
+        "meta": {"engine": "ecg-analyser", "engine_version": "abc123", "duration_ms": 10},
     }
+    if warnings is not None:
+        body["warnings"] = warnings
+    return body
 
 
-def _read_result(request_id, prefix=None, bucket=RESULTS):
-    prefix = prefix or f"reading/{request_id}/run1"
+def _method(request_id, name, status="OK", score=None, warnings=None, prefix=None, bucket=RESULTS):
+    """Um dos seis métodos do contrato 2.0 §3; só `OK` tem leads.json."""
+    base = f"{prefix or f'reading/{request_id}/run1'}/{name}"
+    ok = status == "OK"
     return {
-        "layout": "3x4+1", "calibration": {"speed_mm_s": 25.0, "gain_mm_mv": 10.0},
-        "sampling_rate_hz": 500, "units": "mV",
-        "grid": {"small_box_px": 5.888, "large_box_px": 29.44, "origin_px": [64.0, 60.0],
-                 "rotation_deg": 1.8, "paper_bbox_px": [64.0, 60.0, 1536.0, 960.0]},
-        "leads": [
-            {"name": "I", "kind": "panel", "row": 0, "col": 0, "start_s": 0.0, "duration_s": 2.5,
-             "quality": "good", "coverage": 1.0, "bbox_px": [64, 60, 432, 285], "baseline_y_px": 172.5,
-             "samples": [0.0, 0.0012, 0.0031]},
-            {"name": "V2", "kind": "panel", "row": 1, "col": 2, "start_s": 5.0, "duration_s": 2.5,
-             "quality": "partial", "coverage": 0.6, "samples": [None, 0.1, None]},
-        ],
-        "artifacts": {
-            "overlay": {"bucket": bucket, "key": f"{prefix}/overlay.png", "content_type": "image/png"},
-            "signal": {"bucket": bucket, "key": f"{prefix}/signal.json", "content_type": "application/json"},
+        "method": name, "version": f"{name}-v1", "status": status,
+        "reason": None if ok else "gate", "selector_score": score,
+        "sampling_rate_hz": 150.0 if ok else None, "warnings": warnings or [],
+        "files": {
+            "json": {"bucket": bucket, "key": f"{base}/result.json"},
+            "image": {"bucket": bucket, "key": f"{base}/{'preview' if ok else 'rejection_preview'}.png"},
+            "leads": {"bucket": bucket, "key": f"{base}/leads.json"} if ok else None,
         },
     }
+
+
+def _read_result(request_id, best_warnings=None, prefix=None, bucket=RESULTS):
+    """Seis métodos; o escolhido é `faint_ink` (maior score entre os OK com score)."""
+    kw = {"prefix": prefix, "bucket": bucket}
+    methods = [
+        _method(request_id, "baseline_peaks", "OK", 70.0, **kw),
+        _method(request_id, "chromatic_ink", "BLOCKED", **kw),
+        _method(request_id, "faint_ink", "OK", 87.5, warnings=best_warnings, **kw),
+        _method(request_id, "uneven_photo", "ABSTAINED", **kw),
+        _method(request_id, "grayscale_contrast", "ERROR", **kw),
+        _method(request_id, "same_appearance", "OK", None, **kw),
+    ]
+    return {"layout": "3x4+1", "calibration": {"speed_mm_s": 25.0, "gain_mm_mv": 10.0},
+            "units": "mV", "methods": methods}
+
+
+LEADS_DOC = {"leads": [
+    {"name": "I", "kind": "panel", "row": 0, "col": 0, "start_s": 0.0, "duration_s": 2.5,
+     "quality": "good", "coverage": 1.0, "bbox_px": [64, 60, 432, 285], "baseline_y_px": 172.5,
+     "samples": [0.0, 0.0012, 0.0031]},
+    {"name": "V2", "kind": "panel", "row": 1, "col": 2, "start_s": 5.0, "duration_s": 2.5,
+     "quality": "partial", "coverage": 0.6, "samples": [None, 0.1, None]},
+]}
 
 
 INTERP_RESULT = {
@@ -60,7 +82,7 @@ INTERP_RESULT = {
     "disclaimer": "Resultado gerado automaticamente. Não substitui o laudo de um médico.",
 }
 
-SIGNAL = {"sampling_rate_hz": 500, "units": "mV", "leads": [{"name": "II", "samples": [0.0, 0.1]}]}
+SIGNAL = {"leads": [{"name": "II", "kind": "rhythm", "samples": [0.0, 0.1]}]}
 
 
 def _lambda_response(body, function_error=None):
@@ -95,6 +117,9 @@ class ServicesTestCase(TestCase):
         )
         presign.start()
         self.addCleanup(presign.stop)
+        leads = mock.patch.object(services, "_read_json_from_s3", return_value=LEADS_DOC)
+        self.leads_read = leads.start()
+        self.addCleanup(leads.stop)
 
     def _lambda_returns(self, body, function_error=None):
         self.client_mock.invoke.return_value = _lambda_response(body, function_error)
@@ -111,10 +136,11 @@ class InvokeContractTest(ServicesTestCase):
     def test_valid_envelope_is_returned(self):
         body = _envelope("read", self.rid, "OK", result=_read_result(self.rid))
         self._lambda_returns(body)
-        env = services.invoke_contract("ecg-reading-mock", {"request_id": self.rid}, "read")
+        env = services.invoke_contract("ecg-reading", {"request_id": self.rid}, "read")
         self.assertEqual(env["status"], "OK")
+        self.assertEqual(env["warnings"], [])
         kwargs = self.client_mock.invoke.call_args.kwargs
-        self.assertEqual(kwargs["FunctionName"], "ecg-reading-mock")
+        self.assertEqual(kwargs["FunctionName"], "ecg-reading")
         self.assertEqual(kwargs["InvocationType"], "RequestResponse")
 
     def _assert_synthetic(self, env):
@@ -172,7 +198,7 @@ class LambdaClientConfigTest(TestCase):
 
 
 class RunReadingTest(ServicesTestCase):
-    def test_ok_goes_to_awaiting_validation_without_samples(self):
+    def test_ok_picks_best_method_without_samples(self):
         self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
         status = services.run_reading(self.attempt)
         self._reload()
@@ -182,14 +208,23 @@ class RunReadingTest(ServicesTestCase):
         reading = self.attempt.reading
         self.assertEqual(reading["status"], "OK")
         self.assertIsNone(reading["error"])
+        self.assertEqual(reading["warnings"], [])
+        base = f"reading/{self.rid}/run1/faint_ink"
+        self.leads_read.assert_called_once_with(RESULTS, f"{base}/leads.json")
+        self.assertEqual(reading["artifacts"]["signal"]["key"], f"{base}/leads.json")
+        self.assertEqual(reading["artifacts"]["overlay"]["key"], f"{base}/preview.png")
+        self.assertEqual(reading["method"], {"name": "faint_ink", "version": "faint_ink-v1",
+                                             "selector_score": 87.5, "sampling_rate_hz": 150.0})
+        self.assertEqual([m["method"] for m in reading["methods"]][:3],
+                         ["baseline_peaks", "chromatic_ink", "faint_ink"])
         self.assertEqual(reading["leads"][1], {"name": "V2", "kind": "panel", "quality": "partial", "coverage": 0.6})
         self.assertNotIn("samples", json.dumps(reading))
-        self.assertEqual(reading["artifacts"]["signal"]["key"], f"reading/{self.rid}/run1/signal.json")
 
     def test_payload_follows_contract_without_mock(self):
         self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
         services.run_reading(self.attempt)
         payload = self._sent_payload()
+        self.assertEqual(payload["contract_version"], "2.0")
         self.assertEqual(payload["request_id"], self.rid)
         self.assertEqual(payload["image"], {"bucket": settings.AWS_IMAGES_BUCKET, "key": self.attempt.imagem_s3_key})
         self.assertEqual(payload["layout"], "3x4+1")
@@ -203,23 +238,52 @@ class RunReadingTest(ServicesTestCase):
         services.run_reading(self.attempt)
         self.assertNotIn("mock", self._sent_payload())
 
-        self.attempt.test_scenario = {"read": {"scenario": "refused", "code": "READ_REFUSED_BLURRY"}}
+        self.attempt.test_scenario = {"read": {"scenario": "refused"}}
         ExamAttempt.objects.filter(id=self.attempt.id).update(status=ExamStatus.LEITURA_PROCESSANDO)
         self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
         services.run_reading(self.attempt)
-        self.assertEqual(self._sent_payload()["mock"], {"scenario": "refused", "code": "READ_REFUSED_BLURRY"})
+        self.assertEqual(self._sent_payload()["mock"], {"scenario": "refused"})
 
-    def test_ok_with_warnings_keeps_warnings(self):
-        warnings = [{"code": "LEAD_PARTIAL_TRACE", "message": "Traçado parcial.", "lead": "V2"},
-                    {"code": "IMAGE_ROTATION_CORRECTED", "message": "Alinhada."}]
-        self._lambda_returns(_envelope("read", self.rid, "OK_WITH_WARNINGS",
-                                       result=_read_result(self.rid), warnings=warnings))
+    def test_ok_with_warnings_takes_warnings_from_chosen_method(self):
+        warnings = [{"code": "AMBIGUOUS_TRACE", "message": "Traçado ambíguo.", "lead": "V2"},
+                    {"code": "GRID_CALIBRATION_UNCERTAIN", "message": "Grade incerta."},
+                    {"code": "AMBIGUOUS_TRACE", "message": "repetido", "lead": "V2"},
+                    {"message": "sem code"}]
+        result = _read_result(self.rid, best_warnings=warnings)
+        result["methods"][0]["warnings"] = [{"code": "ORIENTATION_UNCERTAIN", "message": "outro método"}]
+        self._lambda_returns(_envelope("read", self.rid, "OK_WITH_WARNINGS", result=result))
         services.run_reading(self.attempt)
         self._reload()
         self.assertEqual(self.attempt.status, ExamStatus.AGUARDANDO_VALIDACAO)
-        self.assertEqual(self.attempt.reading["warnings"], warnings)
+        self.assertEqual(self.attempt.reading["status"], "OK_WITH_WARNINGS")
+        self.assertEqual(self.attempt.reading["warnings"], warnings[:2])
 
-    def test_refused_keeps_preview_and_region(self):
+    def test_ok_with_warnings_without_method_warnings_says_partial(self):
+        self._lambda_returns(_envelope("read", self.rid, "OK_WITH_WARNINGS", result=_read_result(self.rid)))
+        services.run_reading(self.attempt)
+        self._reload()
+        self.assertEqual([w["code"] for w in self.attempt.reading["warnings"]], ["METHODS_PARTIAL_RESULT"])
+
+    def test_refused_uses_first_method_preview(self):
+        methods = [_method(self.rid, name, "ABSTAINED") for name in ("baseline_peaks", "chromatic_ink")]
+        methods[0]["files"]["image"] = None
+        error = {"code": "READ_REFUSED_UNREADABLE_TRACE", "category": "refused", "retryable": False,
+                 "message": "Traçado ilegível.", "details": {"methods": methods}}
+        self._lambda_returns(_envelope("read", self.rid, "REFUSED", error=error))
+        services.run_reading(self.attempt)
+        self._reload()
+        self.assertEqual(self.attempt.status, ExamStatus.LEITURA_RECUSADA)
+        self.assertEqual(self.exam.status, ExamStatus.LEITURA_RECUSADA)
+        reading = self.attempt.reading
+        self.assertEqual(reading["error"], {"code": "READ_REFUSED_UNREADABLE_TRACE", "category": "refused",
+                                            "retryable": False, "message": "Traçado ilegível."})
+        self.assertEqual(reading["artifacts"]["refusal_preview"]["key"],
+                         f"reading/{self.rid}/run1/chromatic_ink/rejection_preview.png")
+        self.assertIsNone(reading["refusal_region_px"])
+        self.assertEqual([m["status"] for m in reading["methods"]], ["ABSTAINED", "ABSTAINED"])
+        self.assertEqual(services.attempt_flags(self.attempt), {"can_retry": False, "needs_new_photo": True})
+
+    def test_refused_keeps_legacy_preview_and_region(self):
         error = {"code": "READ_REFUSED_OCCLUDED", "category": "refused", "retryable": False,
                  "message": "Há sobreposição sobre o traçado.",
                  "details": {"region_px": [560, 300, 960, 700],
@@ -227,18 +291,15 @@ class RunReadingTest(ServicesTestCase):
         self._lambda_returns(_envelope("read", self.rid, "REFUSED", error=error))
         services.run_reading(self.attempt)
         self._reload()
-        self.assertEqual(self.attempt.status, ExamStatus.LEITURA_RECUSADA)
-        self.assertEqual(self.exam.status, ExamStatus.LEITURA_RECUSADA)
-        reading = self.attempt.reading
-        self.assertEqual(reading["error"], {"code": "READ_REFUSED_OCCLUDED", "category": "refused",
-                                            "retryable": False, "message": "Há sobreposição sobre o traçado."})
-        self.assertEqual(reading["refusal_region_px"], [560, 300, 960, 700])
-        self.assertEqual(reading["artifacts"]["refusal_preview"]["key"], f"reading/{self.rid}/r/refusal_preview.png")
-        self.assertEqual(services.attempt_flags(self.attempt), {"can_retry": False, "needs_new_photo": True})
+        self.assertEqual(self.attempt.reading["refusal_region_px"], [560, 300, 960, 700])
+        self.assertEqual(self.attempt.reading["artifacts"]["refusal_preview"]["key"],
+                         f"reading/{self.rid}/r/refusal_preview.png")
 
     def test_refused_preview_outside_prefix_is_dropped(self):
-        error = {"code": "READ_REFUSED_BLURRY", "category": "refused", "retryable": False, "message": "Borrada.",
-                 "details": {"preview": {"bucket": RESULTS, "key": "reading/outra-tentativa/r/p.png"}}}
+        other = _method("outra-tentativa", "baseline_peaks", "BLOCKED")
+        error = {"code": "READ_REFUSED_LOW_CONTRAST", "category": "refused", "retryable": False, "message": "m",
+                 "details": {"methods": [other],
+                             "preview": {"bucket": RESULTS, "key": "reading/outra-tentativa/r/p.png"}}}
         self._lambda_returns(_envelope("read", self.rid, "REFUSED", error=error))
         services.run_reading(self.attempt)
         self._reload()
@@ -247,21 +308,24 @@ class RunReadingTest(ServicesTestCase):
         self.assertIsNone(self.attempt.reading["refusal_region_px"])
 
     def test_error_not_retryable(self):
-        error = {"code": "READ_GRID_NOT_FOUND", "category": "processing", "retryable": False,
-                 "message": "Não foi possível detectar a grade."}
+        error = {"code": "LAYOUT_UNSUPPORTED", "category": "validation", "retryable": False,
+                 "message": "Layout não suportado."}
         self._lambda_returns(_envelope("read", self.rid, "ERROR", error=error))
         services.run_reading(self.attempt)
         self._reload()
         self.assertEqual(self.attempt.status, ExamStatus.ERRO_LEITURA)
-        self.assertEqual(self.attempt.reading["error"]["code"], "READ_GRID_NOT_FOUND")
+        self.assertEqual(self.attempt.reading["error"]["code"], "LAYOUT_UNSUPPORTED")
         self.assertEqual(services.attempt_flags(self.attempt), {"can_retry": False, "needs_new_photo": True})
 
-    def test_error_retryable(self):
-        error = {"code": "STORAGE_ERROR", "category": "internal", "retryable": True, "message": "Falha no S3."}
+    def test_error_retryable_keeps_methods_summary(self):
+        error = {"code": "READ_SELECTOR_UNAVAILABLE", "category": "processing", "retryable": True,
+                 "message": "Seletor indisponível.",
+                 "details": {"methods": [_method(self.rid, "baseline_peaks", "ERROR")]}}
         self._lambda_returns(_envelope("read", self.rid, "ERROR", error=error))
         services.run_reading(self.attempt)
         self._reload()
         self.assertEqual(self.attempt.status, ExamStatus.ERRO_LEITURA)
+        self.assertEqual(self.attempt.reading["methods"][0]["status"], "ERROR")
         self.assertEqual(services.attempt_flags(self.attempt), {"can_retry": True, "needs_new_photo": False})
 
     def test_function_error_marks_retryable_read_error(self):
@@ -273,15 +337,20 @@ class RunReadingTest(ServicesTestCase):
         self.assertEqual(self.attempt.reading["error"]["code"], "INTERNAL_ERROR")
         self.assertTrue(services.attempt_flags(self.attempt)["can_retry"])
 
-    def test_artifacts_outside_bucket_or_prefix_become_internal_error(self):
-        cases = [
-            _read_result(self.rid, bucket="outro-bucket"),
-            _read_result(self.rid, prefix="reading/outra-tentativa/run1"),
-            _read_result(self.rid, prefix=f"reading/{self.rid}/../x"),
-            {**_read_result(self.rid), "artifacts": {"overlay": None}},
-        ]
-        for result in cases:
-            with self.subTest(artifacts=result["artifacts"]):
+    def test_unusable_methods_become_internal_error(self):
+        no_ok = _read_result(self.rid)
+        for method in no_ok["methods"]:
+            if method["status"] == "OK":
+                method["status"] = "ABSTAINED"
+        cases = {
+            "outro bucket": _read_result(self.rid, bucket="outro-bucket"),
+            "outra tentativa": _read_result(self.rid, prefix="reading/outra-tentativa/run1"),
+            "path traversal": _read_result(self.rid, prefix=f"reading/{self.rid}/../x"),
+            "sem methods": {"layout": "3x4+1", "methods": None},
+            "nenhum OK": no_ok,
+        }
+        for name, result in cases.items():
+            with self.subTest(name):
                 ExamAttempt.objects.filter(id=self.attempt.id).update(status=ExamStatus.LEITURA_PROCESSANDO)
                 self._lambda_returns(_envelope("read", self.rid, "OK", result=result))
                 with self.assertLogs("exams.services", "ERROR"):
@@ -290,6 +359,20 @@ class RunReadingTest(ServicesTestCase):
                 self.assertEqual(self.attempt.status, ExamStatus.ERRO_LEITURA)
                 self.assertEqual(self.attempt.reading["error"]["code"], "INTERNAL_ERROR")
                 self.assertIsNone(self.attempt.reading["artifacts"]["signal"])
+
+    def test_unreadable_leads_json_is_retryable_storage_error(self):
+        for side_effect in (Exception("NoSuchKey"), None):
+            with self.subTest(side_effect=side_effect):
+                ExamAttempt.objects.filter(id=self.attempt.id).update(status=ExamStatus.LEITURA_PROCESSANDO)
+                self.leads_read.side_effect = side_effect
+                self.leads_read.return_value = {"leads": "x"}
+                self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
+                with self.assertLogs("exams.services", "ERROR"):
+                    services.run_reading(self.attempt)
+                self._reload()
+                self.assertEqual(self.attempt.status, ExamStatus.ERRO_LEITURA)
+                self.assertEqual(self.attempt.reading["error"]["code"], "STORAGE_ERROR")
+                self.assertTrue(services.attempt_flags(self.attempt)["can_retry"])
 
     def test_late_result_does_not_overwrite_other_state(self):
         ExamAttempt.objects.filter(id=self.attempt.id).update(status=ExamStatus.ERRO_LEITURA)
@@ -332,12 +415,15 @@ class RunInterpretationTest(ServicesTestCase):
         report = Report.objects.get(attempt=self.attempt)
         self.assertEqual(report.classification, "normal")
         self.assertEqual(report.summary["heart_rate_bpm"], 72)
-        self.assertEqual(report.engine, "ecg-interpret-mock")
+        self.assertEqual(report.engine, "ecg-analyser")
         self.assertEqual(report.engine_version, "abc123")
         self.assertEqual(self.attempt.interpretation["status"], "OK")
-        self.s3_read.assert_called_once_with(RESULTS, f"reading/{self.rid}/run1/signal.json")
+        self.s3_read.assert_called_once_with(RESULTS, f"reading/{self.rid}/run1/faint_ink/leads.json")
         payload = self._sent_payload()
-        self.assertEqual(payload["signal"], SIGNAL)
+        self.assertEqual(payload["contract_version"], "2.0")
+        # leads.json + taxa do método escolhido (contrato 2.0 §4).
+        self.assertEqual(payload["signal"], {**SIGNAL, "sampling_rate_hz": 150.0, "units": "mV"})
+        self.assertNotIn("sampling_rate_hz", SIGNAL)
         self.assertEqual(payload["patient"], {"sex": "F"})
         self.assertNotIn("mock", payload)
         self.assertEqual(self.client_mock.invoke.call_args.kwargs["FunctionName"],
@@ -431,7 +517,7 @@ class AttemptViewsTest(ServicesTestCase):
         view = services.attempt_reading_view(self.attempt)
         self.assertEqual(set(view), {"status", "warnings", "error", "overlay_url", "refusal_preview_url",
                                      "refusal_region_px", "leads"})
-        self.assertEqual(view["overlay_url"], f"https://signed/{RESULTS}/reading/{self.rid}/run1/overlay.png")
+        self.assertEqual(view["overlay_url"], f"https://signed/{RESULTS}/reading/{self.rid}/run1/faint_ink/preview.png")
         self.assertIsNone(view["refusal_preview_url"])
         self.assertEqual(len(view["leads"]), 2)
         self.assertNotIn("samples", json.dumps(view))

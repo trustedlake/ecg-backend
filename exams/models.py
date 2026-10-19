@@ -24,7 +24,8 @@ class Sex(models.TextChoices):
 
 
 class EcgLayout(models.TextChoices):
-    """Layouts suportados pela lambda de leitura (CONTRATO_LAMBDAS.md §2.2)."""
+    """Layouts do contrato antigo. A leitura 2.0 só aceita SUPPORTED_LAYOUTS; os demais ficam
+    aqui para os registros já gravados."""
 
     L3X4 = "3x4", "3x4"
     L3X4_1 = "3x4+1", "3x4+1"
@@ -32,6 +33,10 @@ class EcgLayout(models.TextChoices):
     L6X2 = "6x2", "6x2"
     L6X2_1 = "6x2+1", "6x2+1"
     L12X1 = "12x1", "12x1"
+
+
+# Layouts com configuração na ecg-reading 2.0 (CONTRATO_LAMBDAS.md §2); os demais dão LAYOUT_UNSUPPORTED.
+SUPPORTED_LAYOUTS = (EcgLayout.L3X4_1, EcgLayout.L12X1)
 
 
 class Classification(models.TextChoices):

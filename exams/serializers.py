@@ -3,7 +3,7 @@ from rest_framework import serializers
 from django.conf import settings
 
 from . import services
-from .models import EcgLayout, Exam, ExamAttempt, Feedback, Patient, Sex
+from .models import SUPPORTED_LAYOUTS, Exam, ExamAttempt, Feedback, Patient, Sex
 
 CONTENT_TYPE_BY_EXT = {
     "png": "image/png",
@@ -16,15 +16,13 @@ EXT_BY_CONTENT_TYPE = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "w
 SPEED_CHOICES = [12.5, 25, 50]
 GAIN_CHOICES = [5, 10, 20]
 
-# Cenários aceitos pelas lambdas mock (CONTRATO_LAMBDAS.md §4): cenário → códigos aceitos.
+# Cenários do campo `mock` das lambdas (ecg-lambdas-v1): cenário → códigos aceitos.
+# A ecg-reading 2.0 só recebe o cenário; o código da recusa/erro é decidido por ela.
 READ_SCENARIOS = {
     "success": (),
     "success_with_warnings": (),
-    "failure": ("READ_TRACE_EXTRACTION_FAILED", "READ_GRID_NOT_FOUND", "STORAGE_ERROR", "INTERNAL_ERROR"),
-    "refused": (
-        "READ_REFUSED_BLURRY", "READ_REFUSED_CROPPED", "READ_REFUSED_OCCLUDED",
-        "READ_REFUSED_LOW_CONTRAST", "READ_REFUSED_NOT_ECG", "READ_REFUSED_LAYOUT_MISMATCH",
-    ),
+    "failure": (),
+    "refused": (),
 }
 INTERPRET_SCENARIOS = {
     "success": (),
@@ -197,7 +195,7 @@ class AttemptCreateSerializer(serializers.Serializer):
 
     filename = serializers.CharField(max_length=255)
     content_type = serializers.ChoiceField(choices=list(EXT_BY_CONTENT_TYPE))
-    layout = serializers.ChoiceField(choices=EcgLayout.choices)
+    layout = serializers.ChoiceField(choices=[(layout.value, layout.label) for layout in SUPPORTED_LAYOUTS])
     # FloatField + checagem explícita: ChoiceField compara por texto e recusaria 25.0.
     speed_mm_s = serializers.FloatField(default=25)
     gain_mm_mv = serializers.FloatField(default=10)

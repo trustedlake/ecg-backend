@@ -2,6 +2,7 @@
 
 import json
 import signal
+import threading
 from unittest import mock
 
 from django.core.management import call_command
@@ -130,7 +131,7 @@ class CommandTests(SimpleTestCase):
         with self.assertRaises(CommandError):
             call_command("ecg_worker")
 
-    @override_settings(ECG_TASK_QUEUE_URL=QUEUE)
+    @override_settings(ECG_TASK_QUEUE_URL=QUEUE, ECG_WORKER_CONCURRENCY=1)
     @mock.patch("exams.management.commands.ecg_worker.signal.signal")
     @mock.patch.object(Worker, "run")
     @mock.patch("exams.tasks._sqs_client")
@@ -138,3 +139,16 @@ class CommandTests(SimpleTestCase):
         call_command("ecg_worker")
         run.assert_called_once()
         self.assertEqual({c.args[0] for c in sig.call_args_list}, {signal.SIGTERM, signal.SIGINT})
+
+    @override_settings(ECG_TASK_QUEUE_URL=QUEUE, ECG_WORKER_CONCURRENCY=3)
+    @mock.patch("exams.management.commands.ecg_worker.signal.signal")
+    @mock.patch("exams.tasks._sqs_client")
+    def test_concurrency_runs_one_loop_per_thread(self, _client, _sig):
+        threads = []
+
+        def fake_run(worker):
+            threads.append(threading.current_thread().name)
+
+        with mock.patch.object(Worker, "run", fake_run):
+            call_command("ecg_worker")
+        self.assertEqual(sorted(threads), ["ecg-worker-0", "ecg-worker-1", "ecg-worker-2"])

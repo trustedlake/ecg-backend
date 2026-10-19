@@ -40,16 +40,18 @@ O export web do app Expo (repo `leitor-ecg`) é servido pelo próprio Django, na
 
 ```bash
 scripts/build_frontend.sh ../leitor-ecg        # npm ci + expo export --platform web → frontend_dist/
-python mock_lambdas/local_server.py --async 3  # Django + lambdas mock + S3 falso, sem AWS; login dev / dev12345
+python scripts/local_server.py --async 3 --lambdas-repo ../ecg-lambdas-v1
+# Django + lambdas falsas + S3 falso, sem AWS; login dev / dev12345
 ```
+
+A leitura local é um fake do contrato 2.0 (`scripts/local_lambdas.py`, com os cenários do campo `mock`); a interpretação é o handler mock do clone do [tl-gmiler/ecg-lambdas-v1](https://github.com/tl-gmiler/ecg-lambdas-v1).
 
 Abra `http://127.0.0.1:23132/`. O backend local só escuta em `127.0.0.1` (as URLs de upload também apontam para lá), então serve para a versão web; o Expo Go no celular aponta para a API de prod com `EXPO_PUBLIC_API_BASE_URL=<api_url>`. Em produção, o build do `frontend_dist/` roda no CodeBuild (`ci/buildspec-build.yml`).
 
 ## Testes
 
 ```bash
-python -m unittest discover -s tests -v  # 5 testes de serviço isolados, sem Django
-python manage.py test                     # suíte de views/modelos, requer dependências
+python manage.py test                     # suíte do backend (lambdas, S3 e SQS mockados)
 python manage.py check --deploy --fail-level WARNING  # após configurar produção
 ```
 

@@ -99,7 +99,8 @@ locals {
       period      = 300
       periods     = 1
       comparison  = "GreaterThanThreshold"
-      threshold   = 300
+      # Uma leitura real leva 50–190 s (até 900 s); acima de 10 min a fila está travada.
+      threshold = 600
     }
     "ecg-lambda-reading-errors" = {
       description = "Lambda de leitura: erros de execução"

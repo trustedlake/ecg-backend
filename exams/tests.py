@@ -139,14 +139,15 @@ class AttemptCreateTest(BaseAPITestCase):
         self.assertIsNone(attempt.test_scenario)
         self.assertEqual(put.call_args.kwargs["content_type"], "image/jpeg")
 
-    def test_all_layouts_accepted(self, _put):
+    def test_only_reading_2_0_layouts_accepted(self, _put):
         exam = self._exame()
-        for layout in ("3x4", "3x4+1", "3x4+3", "6x2", "6x2+1", "12x1"):
+        for layout in ("3x4+1", "12x1"):
             self.assertEqual(self._post(exam, layout=layout).status_code, 201, layout)
-        self.assertEqual(
-            sorted(ExamAttempt.objects.values_list("layout", flat=True)),
-            sorted(["3x4", "3x4+1", "3x4+3", "6x2", "6x2+1", "12x1"]),
-        )
+        for layout in ("3x4", "3x4+3", "6x2", "6x2+1"):
+            resp = self._post(exam, layout=layout)
+            self.assertEqual(resp.status_code, 400, layout)
+            self.assertIn("layout", resp.data)
+        self.assertEqual(sorted(ExamAttempt.objects.values_list("layout", flat=True)), ["12x1", "3x4+1"])
 
     def test_layout_required_and_validated(self, _put):
         exam = self._exame()
@@ -200,7 +201,7 @@ class AttemptCreateTest(BaseAPITestCase):
         self.assertEqual(resp.status_code, 404)
 
 
-SCENARIO = {"read": {"scenario": "refused", "code": "READ_REFUSED_BLURRY"},
+SCENARIO = {"read": {"scenario": "refused"},
             "interpret": {"scenario": "success_with_warnings"}}
 
 
@@ -248,8 +249,9 @@ class TestScenarioGateTest(BaseAPITestCase):
     def test_scenario_catalog(self, _put):
         valid = [
             {"read": {"scenario": "success"}},
-            {"read": {"scenario": "failure", "code": "STORAGE_ERROR"}},
+            {"read": {"scenario": "failure"}},
             {"read": {"scenario": "refused"}},
+            {"read": {"scenario": "success_with_warnings"}},
             {"interpret": {"scenario": "failure", "code": "INTERP_NO_QRS_DETECTED"}},
         ]
         for scenario in valid:
@@ -258,7 +260,8 @@ class TestScenarioGateTest(BaseAPITestCase):
             {},
             {"read": {"scenario": "explode"}},
             {"interpret": {"scenario": "refused"}},
-            {"read": {"scenario": "refused", "code": "INTERP_NO_QRS_DETECTED"}},
+            {"read": {"scenario": "refused", "code": "READ_REFUSED_BLURRY"}},
+            {"read": {"scenario": "failure", "code": "STORAGE_ERROR"}},
             {"read": {"scenario": "success", "code": "READ_REFUSED_BLURRY"}},
             {"interpret": {"scenario": "failure", "code": "READ_GRID_NOT_FOUND"}},
             {"other": {"scenario": "success"}},

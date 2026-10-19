@@ -1,15 +1,17 @@
-"""Backend local completo, sem AWS: Django + lambdas mock no mesmo processo + S3 falso em disco.
+"""Backend local completo, sem AWS: Django + lambdas falsas no mesmo processo + S3 falso em disco.
 
-Para desenvolver e conferir o app (etapas F2–F4) sem gravar nada na AWS:
-- `services._lambda_client()` vira um cliente falso que chama `reading/handler.py` e
-  `interpretation/handler.py` direto (envelope e validações de verdade do `invoke_contract`);
+Para desenvolver e conferir o app sem gravar nada na AWS:
+- `services._lambda_client()` vira um cliente falso: a leitura é `scripts/local_lambdas.py` (contrato
+  2.0, cenários do campo `mock`) e a interpretação é o handler mock de verdade do repo
+  tl-gmiler/ecg-lambdas-v1 (`mock_lambdas/interpretation/handler.py`), lido de `--lambdas-repo`;
 - o S3 (presigned PUT/GET, artefatos das lambdas, sinal) vira uma pasta local servida em `/__local_s3/`;
 - `ECG_TASK_MODE=inline`, cenários de teste ligados e um usuário staff `dev` / `dev12345`;
 - `--async N`: imita a fila de produção. O endpoint responde 202 na hora e a fase roda numa thread
   depois de N segundos (o app faz polling, como com o worker SQS).
 
 Uso (venv com os requirements do backend + Pillow + numpy):
-    python mock_lambdas/local_server.py [--port 23132] [--data /tmp/ecg-local] [--async 3]
+    python scripts/local_server.py [--port 23132] [--data /tmp/ecg-local] [--async 3]
+                                   [--lambdas-repo ../ecg-lambdas-v1]
 Se existir `frontend_dist/` (export web do Expo), o app web abre na raiz, mesma origem da API.
 """
 
@@ -32,10 +34,15 @@ def parse_args():
     parser.add_argument("--data", default="/tmp/ecg-local", help="pasta do SQLite e do S3 falso")
     parser.add_argument("--async", dest="async_delay", type=float, default=None, metavar="SEGUNDOS",
                         help="roda as fases numa thread após SEGUNDOS (imita a fila SQS)")
+    parser.add_argument("--lambdas-repo", default=os.environ.get("ECG_LAMBDAS_V1_DIR", str(ROOT.parent / "ecg-lambdas-v1")),
+                        help="clone do tl-gmiler/ecg-lambdas-v1 (interpretação mock e ecg_contract)")
     return parser.parse_args()
 
 
 ARGS = parse_args()
+LAMBDAS = Path(ARGS.lambdas_repo).resolve() / "mock_lambdas"
+if not (LAMBDAS / "interpretation" / "handler.py").is_file():
+    sys.exit(f"Não achei {LAMBDAS}/interpretation/handler.py; clone o tl-gmiler/ecg-lambdas-v1 e use --lambdas-repo.")
 DATA = Path(ARGS.data)
 S3_DIR = DATA / "s3"
 BASE_URL = f"http://127.0.0.1:{ARGS.port}"
@@ -48,7 +55,7 @@ os.environ["ECG_TASK_MODE"] = "inline"
 os.environ.setdefault("ECG_TEST_SCENARIOS_ENABLED", "True")
 os.environ.setdefault("RESULTS_BUCKET", "ecg-lambdas-results-785236377332-sa-east-1")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-sys.path[:0] = [str(ROOT), str(HERE)]
+sys.path[:0] = [str(ROOT), str(HERE), str(LAMBDAS)]
 S3_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -89,27 +96,29 @@ class FakeS3:
         return {"Body": io.BytesIO(path.read_bytes())}
 
 
-def _load_handler(name, relative):
-    spec = importlib.util.spec_from_file_location(name, HERE / relative)
+def _load_handler(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 class FakeLambda:
-    """Chama os handlers mock no processo; mesmo formato de resposta do boto3 `invoke`."""
+    """Chama os handlers no processo; mesmo formato de resposta do boto3 `invoke`."""
 
     def __init__(self, s3):
-        self.reading = _load_handler("mock_reading_handler", "reading/handler.py")
-        self.reading._s3 = lambda: s3
-        self.interpretation = _load_handler("mock_interpretation_handler", "interpretation/handler.py")
+        import local_lambdas
+
+        self.reading = lambda event, _context: local_lambdas.handler(event, s3)
+        self.interpretation = _load_handler("mock_interpretation_handler",
+                                            LAMBDAS / "interpretation" / "handler.py").handler
 
     def invoke(self, FunctionName, Payload, **_):
         from django.conf import settings
 
         handler = {
-            settings.AWS_LAMBDA_ECG_READING: self.reading.handler,
-            settings.AWS_LAMBDA_ECG_INTERPRETATION: self.interpretation.handler,
+            settings.AWS_LAMBDA_ECG_READING: self.reading,
+            settings.AWS_LAMBDA_ECG_INTERPRETATION: self.interpretation,
         }[FunctionName]
         result = handler(json.loads(Payload), None)
         return {"StatusCode": 200, "Payload": io.BytesIO(json.dumps(result).encode())}
@@ -187,7 +196,7 @@ def main():
         User.objects.create_superuser(username="dev", password="dev12345", email="dev@local", name="Dra. Dev")
         print("Usuário criado: dev / dev12345 (staff)")
     mode = "inline" if ARGS.async_delay is None else f"assíncrono, {ARGS.async_delay:g} s por fase"
-    print(f"Backend local (lambdas mock + S3 em {S3_DIR}, fases {mode}) em {BASE_URL}")
+    print(f"Backend local (lambdas falsas + S3 em {S3_DIR}, fases {mode}) em {BASE_URL}")
     call_command("runserver", f"127.0.0.1:{ARGS.port}", use_reloader=False)
 
 

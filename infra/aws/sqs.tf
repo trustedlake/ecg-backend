@@ -6,10 +6,12 @@ resource "aws_sqs_queue" "tasks_dlq" {
   message_retention_seconds = 1209600
 }
 
+# Visibility maior que o read_timeout do boto (AWS_LAMBDA_READ_TIMEOUT=930 s; a ecg-reading roda
+# até 900 s): a mensagem só reaparece se o worker morrer no meio da fase.
 resource "aws_sqs_queue" "tasks" {
   name                       = "ecg-tasks"
   sqs_managed_sse_enabled    = true
-  visibility_timeout_seconds = 900
+  visibility_timeout_seconds = 960
   receive_wait_time_seconds  = 20
   message_retention_seconds  = 86400
 

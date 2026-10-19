@@ -58,13 +58,16 @@ no próximo deploy do pipeline (o serviço ignora `task_definition`).
 
 ## CI/CD (`cicd.tf`, `ci/`)
 CodePipeline V2 `ecg-backend` (modo QUEUED): push na `main` de `tl-gmiler/ecg-backend` **ou**
-`tl-gmiler/leitor-ecg` → **Test** (`ci/buildspec-test.yml`) → **Build** (export web do Expo com
+`trustedlake/leitor-ecg` → **Test** (`ci/buildspec-test.yml`) → **Build** (export web do Expo com
 `scripts/build_frontend.sh` + imagem ARM no ECR, tag `<sha back>-<sha front>`) → **Deploy** (`ci/deploy.sh`).
 Falha do pipeline manda e-mail pelo SNS `ecg-alerts`.
 
-1. **Autorizar o GitHub (uma vez, depois do apply):** console AWS → Developer Tools → Settings →
-   Connections → `ecg-github` (status *Pending*) → *Update pending connection* → instalar/escolher o app
-   do GitHub com acesso aos dois repos. Até isso o pipeline falha na etapa Source.
+1. **Autorizar o GitHub (uma vez, depois do apply):** os repos estão em contas diferentes e cada conexão
+   enxerga uma só conta. Console AWS → Developer Tools → Settings → Connections:
+   - `ecg-github` (backend, conta `tl-gmiler`) → *Update pending connection* → instalar/escolher o app
+     da AWS na conta `tl-gmiler`;
+   - `ecg-github-frontend` (app, conta `trustedlake`) → o mesmo, logado no GitHub como `trustedlake`.
+   Até isso o pipeline falha na etapa Source.
 2. **Disparar à mão:** `aws codepipeline start-pipeline-execution --name ecg-backend`.
 3. **O que o deploy faz:** liga o RDS se estiver parado, registra uma revisão nova da task definition
    (a partir da última da família, então mudanças do Terraform entram aqui), roda `migrate` e

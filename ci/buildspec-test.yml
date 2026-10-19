@@ -1,4 +1,4 @@
-# Etapa Test do pipeline: migrations em dia, testes do Django e das lambdas mock.
+# Etapa Test do pipeline: migrations em dia e testes do Django (as lambdas são testadas no ecg-lambdas-v1).
 version: 0.2
 
 env:
@@ -11,9 +11,8 @@ phases:
     runtime-versions:
       python: 3.12
     commands:
-      - python -m pip install --quiet -r requirements.txt pillow numpy
+      - python -m pip install --quiet -r requirements.txt
   build:
     commands:
       - python manage.py makemigrations --check --dry-run
       - python manage.py test
-      - python -m unittest discover -s mock_lambdas/tests

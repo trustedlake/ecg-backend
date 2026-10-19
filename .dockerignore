@@ -13,7 +13,7 @@ media
 docs
 infra
 infra-oracle
-mock_lambdas
+scripts/local_*.py
 ci
 **/tests.py
 **/test_*.py

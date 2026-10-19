@@ -36,7 +36,10 @@ resource "aws_service_discovery_service" "backend" {
   }
 
   # O ECS informa a saúde (health check do container web) e tira do Cloud Map a task doente.
-  health_check_custom_config {}
+  # O bloco vazio não chega à AWS (o provider omite); failure_threshold (obsoleto, a AWS sempre usa 1) o força.
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 }
 
 # --- Task definition ---

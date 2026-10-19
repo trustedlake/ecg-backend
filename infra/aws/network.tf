@@ -70,21 +70,21 @@ resource "aws_route_table_association" "private" {
 
 resource "aws_security_group" "vpclink" {
   name        = "${local.name}-vpclink"
-  description = "VPC Link do API Gateway: sem entrada; sai só para o container web"
+  description = "VPC Link do API Gateway: sem entrada; sai so para o container web"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-vpclink" }
 }
 
 resource "aws_security_group" "ecs" {
   name        = "${local.name}-ecs"
-  description = "Tasks do ECS: entrada 8000 só do VPC Link"
+  description = "Tasks do ECS: entrada 8000 so do VPC Link"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-ecs" }
 }
 
 resource "aws_security_group" "rds" {
   name        = "${local.name}-rds"
-  description = "RDS: entrada 5432 só das tasks do ECS"
+  description = "RDS: entrada 5432 so das tasks do ECS"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-rds" }
 }

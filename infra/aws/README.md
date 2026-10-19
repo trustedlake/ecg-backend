@@ -25,7 +25,7 @@ Buckets e lambdas **não** são gerenciados aqui (stacks `ecg-lambdas` e `mock_l
 ```sh
 cd infra/aws
 terraform init
-terraform plan -var alarm_email=<seu e-mail> -out tf.plan
+terraform plan -out tf.plan  # alarm_email padrão: gustavo.miler@trustedlake.com
 terraform apply tf.plan      # só com aprovação explícita
 ```
 A senha do banco não vai para o plan nem para o state (`password_wo`). Para trocá-la: atualize o

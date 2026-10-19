@@ -6,10 +6,12 @@ resource "aws_appautoscaling_target" "backend" {
   service_namespace  = "ecs"
   resource_id        = "service/${aws_ecs_cluster.this.name}/${aws_ecs_service.backend.name}"
   scalable_dimension = "ecs:service:DesiredCount"
-  min_capacity       = 1
-  max_capacity       = 2
 
-  # As ações agendadas (e os scripts) mexem em min/max ao longo do dia.
+  # Nasce em 0 (a imagem só existe depois do primeiro build): o ci/deploy.sh ou a ação das 08:00 sobem
+  # para min 1. Depois disso as ações agendadas (e os scripts) mexem em min/max ao longo do dia.
+  min_capacity = 0
+  max_capacity = 2
+
   lifecycle {
     ignore_changes = [min_capacity, max_capacity]
   }

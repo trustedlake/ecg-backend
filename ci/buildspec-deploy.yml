@@ -1,0 +1,10 @@
+# Etapa Deploy: migrate + ensure_admin (run-task), update-service, smoke e rollback (ci/deploy.sh).
+# Fonte primária: backend; secundária "image" com image.env da etapa Build.
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - . "$CODEBUILD_SRC_DIR_image/image.env"
+      - export IMAGE_TAG
+      - ci/deploy.sh

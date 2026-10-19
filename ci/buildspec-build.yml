@@ -1,0 +1,31 @@
+# Etapa Build: export web do Expo (fonte secundária "frontend") + imagem ARM no ECR.
+# Tag imutável <sha backend>-<sha frontend>; se já existe no ECR, reaproveita sem novo push.
+# BACKEND_SHA, FRONTEND_SHA e ECR_REPOSITORY_URL vêm do pipeline/projeto (infra/aws/cicd.tf).
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+  pre_build:
+    commands:
+      - export IMAGE_TAG="$(echo "$BACKEND_SHA" | cut -c1-7)-$(echo "$FRONTEND_SHA" | cut -c1-7)"
+      - echo "IMAGE_TAG=$IMAGE_TAG"
+      - aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%%/*}"
+  build:
+    commands:
+      - |
+        if aws ecr describe-images --repository-name "${ECR_REPOSITORY_URL#*/}" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+          echo "Imagem $IMAGE_TAG já existe no ECR; pulando build."
+        else
+          scripts/build_frontend.sh "$CODEBUILD_SRC_DIR_frontend"
+          docker build --build-arg APP_VERSION="$IMAGE_TAG" -t "$ECR_REPOSITORY_URL:$IMAGE_TAG" .
+          docker push "$ECR_REPOSITORY_URL:$IMAGE_TAG"
+        fi
+  post_build:
+    commands:
+      - echo "IMAGE_TAG=$IMAGE_TAG" > image.env
+
+artifacts:
+  files:
+    - image.env

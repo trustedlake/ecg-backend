@@ -39,6 +39,7 @@ Depois do primeiro apply, confirme a assinatura do SNS no e-mail recebido (sem i
 - `api.tf`: HTTP API → VPC Link → Cloud Map. A URL fica no output `api_url`.
 - `schedule.tf`: autoscaling (1–2 tasks, CPU 70 %) e o horário comercial.
 - `monitoring.tf`: SNS `ecg-alerts`, 10 alarmes e o budget mensal (US$35).
+- `cicd.tf`: conexão GitHub, 3 projetos CodeBuild, bucket de artefatos e o CodePipeline.
 
 ## Horário de funcionamento
 Seg–sex, fuso `America/Sao_Paulo`: o RDS liga às 07:40 e desliga às 20:10; o ECS sobe às 08:00 e
@@ -55,6 +56,23 @@ vai a 0 às 20:00. Fora disso o API Gateway responde 503 e o app mostra o aviso 
 task_memory=2048`. O Terraform registra uma revisão nova da task definition; o serviço só passa a usá-la
 no próximo deploy do pipeline (o serviço ignora `task_definition`).
 
+## CI/CD (`cicd.tf`, `ci/`)
+CodePipeline V2 `ecg-backend` (modo QUEUED): push na `main` de `tl-gmiler/ecg-backend` **ou**
+`tl-gmiler/leitor-ecg` → **Test** (`ci/buildspec-test.yml`) → **Build** (export web do Expo com
+`scripts/build_frontend.sh` + imagem ARM no ECR, tag `<sha back>-<sha front>`) → **Deploy** (`ci/deploy.sh`).
+Falha do pipeline manda e-mail pelo SNS `ecg-alerts`.
+
+1. **Autorizar o GitHub (uma vez, depois do apply):** console AWS → Developer Tools → Settings →
+   Connections → `ecg-github` (status *Pending*) → *Update pending connection* → instalar/escolher o app
+   do GitHub com acesso aos dois repos. Até isso o pipeline falha na etapa Source.
+2. **Disparar à mão:** `aws codepipeline start-pipeline-execution --name ecg-backend`.
+3. **O que o deploy faz:** liga o RDS se estiver parado, registra uma revisão nova da task definition
+   (a partir da última da família, então mudanças do Terraform entram aqui), roda `migrate` e
+   `ensure_admin` em tasks avulsas, atualiza o serviço, faz smoke em `/api/health/` (versão nova) e `/`,
+   e volta para a revisão anterior se o smoke falhar.
+4. **Deploy fora do horário:** o ambiente é ligado só para o deploy e desligado de novo no fim
+   (ECS em 0, RDS parando). Dentro do horário fica como está.
+
 ## Primeiro deploy
-O serviço é criado com 0 tasks, porque a imagem `bootstrap` não existe no ECR. Quem sobe a primeira
-imagem e a primeira revisão é o pipeline (I3, `ci/deploy.sh`).
+O serviço e o autoscaling nascem com 0 tasks, porque a imagem `bootstrap` não existe no ECR. A primeira
+execução do pipeline cria a imagem, a revisão e sobe a task (ou a ação das 08:00 sobe no dia seguinte).

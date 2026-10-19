@@ -1,0 +1,19 @@
+# Etapa Test do pipeline: migrations em dia, testes do Django e das lambdas mock.
+version: 0.2
+
+env:
+  variables:
+    DEBUG: "True"
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - python -m pip install --quiet -r requirements.txt pillow numpy
+  build:
+    commands:
+      - python manage.py makemigrations --check --dry-run
+      - python manage.py test
+      - python -m unittest discover -s mock_lambdas/tests

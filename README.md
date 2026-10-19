@@ -34,6 +34,17 @@ Para Expo Web, autorize no Django e no CORS do S3 a origem exata do navegador. P
 
 A Lambda precisa de `s3:GetObject` nos dois buckets e `s3:PutObject` no bucket de resultados; o Django precisa das permissões de invocação e geração de URLs pré-assinadas. A imagem de deploy é montada com o `Dockerfile.lambda` do ECG Analyser. **Nenhum deploy AWS é realizado pelo ZIP.**
 
+## App web e backend local (V1)
+
+O export web do app Expo (repo `leitor-ecg`) é servido pelo próprio Django, na mesma origem da API: WhiteNoise serve `frontend_dist/` e o catch-all de `config/spa.py` devolve o `index.html` para qualquer rota fora de `/api`, `/admin` e `/static` (recarregar numa tela interna, como `/exames/<id>/tentativas/<id>`, abre o app nela).
+
+```bash
+scripts/build_frontend.sh ../leitor-ecg        # npm ci + expo export --platform web → frontend_dist/
+python mock_lambdas/local_server.py --async 3  # Django + lambdas mock + S3 falso, sem AWS; login dev / dev12345
+```
+
+Abra `http://127.0.0.1:23132/`. O backend local só escuta em `127.0.0.1` (as URLs de upload também apontam para lá), então serve para a versão web; o Expo Go no celular aponta para a API de prod com `EXPO_PUBLIC_API_BASE_URL=<api_url>`. Em produção, o build do `frontend_dist/` roda no CodeBuild (`ci/buildspec-build.yml`).
+
 ## Testes
 
 ```bash

@@ -124,6 +124,7 @@ variable "rds_stop_cron" {
 variable "alarm_email" {
   type        = string
   description = "E-mail que recebe alarmes e avisos de custo (confirmar a assinatura do SNS)."
+  default     = "gustavo.miler@trustedlake.com"
 }
 
 variable "monthly_budget_usd" {

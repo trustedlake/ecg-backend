@@ -255,23 +255,26 @@ AWS_RESULTS_BUCKET = env(
     "AWS_RESULTS_BUCKET",
     default="ecg-lambdas-results-785236377332-sa-east-1",
 )
-# Lambdas do contrato v1 (CONTRATO_LAMBDAS.md). Trocar mock por real = trocar o nome aqui.
-AWS_LAMBDA_ECG_READING = env("AWS_LAMBDA_ECG_READING", default="ecg-reading-mock")
+# Lambdas do contrato (tl-gmiler/ecg-lambdas-v1, CONTRATO_LAMBDAS.md): leitura 2.0 real e
+# interpretação mock. Os cenários de teste são o campo `mock` do payload, nas mesmas funções.
+AWS_LAMBDA_ECG_READING = env("AWS_LAMBDA_ECG_READING", default="ecg-reading")
 AWS_LAMBDA_ECG_INTERPRETATION = env(
-    "AWS_LAMBDA_ECG_INTERPRETATION", default="ecg-interpretation-mock"
+    "AWS_LAMBDA_ECG_INTERPRETATION", default="ecg-interpretation"
 )
 # Libera o campo test_scenario (repassado como `mock` às lambdas) para usuários staff.
 ECG_TEST_SCENARIOS_ENABLED = env.bool("ECG_TEST_SCENARIOS_ENABLED", default=False)
 PRESIGN_URL_EXPIRES = env.int("PRESIGN_URL_EXPIRES", default=3600)
 
-# Must exceed the reading Lambda timeout.
-AWS_LAMBDA_READ_TIMEOUT = env.int("AWS_LAMBDA_READ_TIMEOUT", default=270)
+# Must exceed the reading Lambda timeout (ecg-reading: 900 s).
+AWS_LAMBDA_READ_TIMEOUT = env.int("AWS_LAMBDA_READ_TIMEOUT", default=930)
 
 # Execução das fases: "inline" (na hora, dev/testes) ou "sqs" (fila consumida pelo worker).
 ECG_TASK_MODE = env("ECG_TASK_MODE", default="inline")
 if ECG_TASK_MODE not in ("inline", "sqs"):
     raise ImproperlyConfigured("ECG_TASK_MODE deve ser 'inline' ou 'sqs'.")
 ECG_TASK_QUEUE_URL = env("ECG_TASK_QUEUE_URL", default="")
+# Mensagens processadas em paralelo pelo worker; cada leitura real espera a lambda por até 900 s.
+ECG_WORKER_CONCURRENCY = env.int("ECG_WORKER_CONCURRENCY", default=4)
 if ECG_TASK_MODE == "sqs" and not ECG_TASK_QUEUE_URL:
     raise ImproperlyConfigured("ECG_TASK_MODE=sqs exige ECG_TASK_QUEUE_URL.")
 
@@ -281,4 +284,4 @@ APP_VERSION = env("APP_VERSION", default="dev")
 # An attempt stuck in "*_processando" longer than this (seconds) is considered
 # interrupted (e.g. the worker restarted during the Lambda call). Must exceed the
 # Lambda read timeout so a call still in flight is never recovered by mistake.
-STALE_PROCESSING_SECONDS = env.int("STALE_PROCESSING_SECONDS", default=600)
+STALE_PROCESSING_SECONDS = env.int("STALE_PROCESSING_SECONDS", default=1200)

@@ -68,7 +68,7 @@ WorkingDirectory=/home/ecgapp/ecg-backend
 EnvironmentFile=/home/ecgapp/ecg-backend/.env
 # Timeout acima de 300s: lambdas da Fase B podem demorar mais que o default do gunicorn
 ExecStart=/home/ecgapp/ecg-backend/.venv/bin/gunicorn config.wsgi:application \
-  --bind 0.0.0.0:8000 --timeout 360 --workers 1
+  --bind 0.0.0.0:8000 --timeout 960 --workers 1
 Restart=on-failure
 
 [Install]

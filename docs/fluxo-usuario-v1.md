@@ -20,7 +20,7 @@
 
 | # | Tema | Decisão | Status |
 |---|---|---|---|
-| D1 | Contrato | Contrato v1 (`CONTRATO_LAMBDAS.md`) com as mocks `ecg-reading-mock` / `ecg-interpretation-mock` já deployadas. Trocar mock por real = trocar o nome da função na env. | **decidida** |
+| D1 | Contrato | ~~Contrato v1 com as mocks `ecg-reading-mock` / `ecg-interpretation-mock`.~~ **Revista em 19/10 (B6):** leitura real `ecg-reading` no contrato 2.0 e interpretação mock `ecg-interpretation` (repo tl-gmiler/ecg-lambdas-v1, `CONTRATO_LAMBDAS.md`). Os cenários de teste são o campo `mock` do payload nas mesmas funções; as lambdas `-mock` foram apagadas. | **decidida** |
 | D2 | Refine (pincel) | Sai da V1. Recusar a leitura = nova foto. Código de `refine` e a integração com `ecg-analyser` são removidos do backend. | **decidida** |
 | D3 | Hosting | **Tudo na AWS.** Django em **ECS Fargate ARM** (0,5 vCPU / 1 GB, 1–2 tasks) atrás de API Gateway HTTP API + VPC Link + Cloud Map (HTTPS nativo `execute-api`, sem ALB). App web (export do Expo) servido pelo próprio Django via WhiteNoise. Tasks em subnet pública com SG fechado (sem NAT). **Sem CloudFront.** Lambda para o Django foi vetada (preferência por boas práticas de container). | **decidida** |
 | D4 | Banco | **RDS PostgreSQL `db.t4g.micro` Single-AZ**, gp3 20 GB, subnet privada, TLS obrigatório, backup 7 dias, proteção contra exclusão. Multi-AZ fora. Senha no SSM (fora do state do Terraform). | **decidida** |

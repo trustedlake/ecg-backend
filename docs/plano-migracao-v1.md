@@ -18,7 +18,8 @@
   `apps/web` = Vite legado, será aposentado). Antes de escrever código Expo, ler a doc versionada
   `https://docs.expo.dev/versions/v57.0.0/` (regra do `apps/mobile/AGENTS.md`). Trabalhar na branch
   `feat/expo-v1-flow` (criar a partir de `main`).
-- Lambdas: `ecg-reading-mock` e `ecg-interpretation-mock` já deployadas em `sa-east-1` (conta `785236377332`).
+- Lambdas: ~~`ecg-reading-mock` e `ecg-interpretation-mock`~~ → desde a B6, `ecg-reading` (real, contrato 2.0) e
+  `ecg-interpretation` (mock), em `sa-east-1` (conta `785236377332`); cenários de teste pelo campo `mock`.
   Buckets: imagens `ecg-lambdas-images-785236377332-sa-east-1`, resultados `ecg-lambdas-results-785236377332-sa-east-1`
   (gerenciados pelo Terraform do repo `ecg-lambdas`, **não** por este repo).
 
@@ -31,7 +32,7 @@ Navegador (web) ───┴─HTTPS─▶ API Gateway HTTP API (URL execute-api
                                                                                /api/*, /admin/ e o export web do Expo)
                                                                              + container "worker" (manage.py ecg_worker,
                                                                                consome a fila SQS)
-  web ──▶ SQS ecg-tasks (+ DLQ) ──▶ worker ──▶ Lambda ecg-reading-mock / ecg-interpretation-mock
+  web ──▶ SQS ecg-tasks (+ DLQ) ──▶ worker ──▶ Lambda ecg-reading (2.0) / ecg-interpretation (mock)
   web/worker ──▶ RDS PostgreSQL db.t4g.micro Single-AZ (subnet privada, TLS)
   web/worker ──▶ S3 (presigned PUT da foto, GET dos artefatos)
   segredos: SSM Parameter Store SecureString /ecg/prod/* injetados pelo ECS (task definition "secrets")
@@ -142,7 +143,8 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 | I1 Terraform: rede, RDS, ECR, SQS, IAM (só plan) | backend | B4 | F2–F4 |
 | I2 Terraform: ECS, API Gateway, horário, monitoramento (só plan) | backend | I1 | F2–F4 |
 | I3 CI/CD: CodePipeline V2 + CodeBuild (só plan) | backend | I2, F4 | — |
-| D1 Primeiro deploy em prod (**com o Gus**) | — | I3 + parâmetros SSM criados | — |
+| B6 Leitura no contrato 2.0 (`ecg-reading`) + merge da `main` | ambos | I3, F4 | — |
+| D1 Primeiro deploy em prod (**com o Gus**) | — | B6 + parâmetros SSM criados | — |
 | E1 Teste ponta a ponta em prod (matriz completa) | — | D1 | — |
 | C1 Limpeza do legado (**com o Gus**) | ambos | E1 | — |
 
@@ -694,6 +696,38 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 > `docker build` ARM).
 
 ---
+
+
+## B6 — Leitura no contrato 2.0 (`ecg-reading`) — feita em 19/10
+
+Motivo: entre 15 e 19/10, os PRs #6, #7 e #8 do backend e o PR #2 do `ecg-lambdas-v1` levaram as mocks e o
+contrato para o `ecg-lambdas-v1`, ligaram o backend antigo à `ecg-reading` real (contrato 2.0) e apagaram as
+lambdas `-mock`. O que mudou na V1:
+
+- Merge da `origin/main`, mantendo a reescrita da V1 e portando a lógica do Chris.
+- `exams/services.py`:
+  - fica com o método `OK` de maior `selector_score`;
+  - overlay = `files.image` do método e `signal` da interpretação = `files.leads` (`leads.json`), com
+    `sampling_rate_hz` do método e `units` mV;
+  - avisos vêm do método escolhido; `METHODS_PARTIAL_RESULT` entra quando a lambda diz `OK_WITH_WARNINGS`
+    sem nenhum aviso;
+  - na recusa, a prévia é a imagem de recusa do primeiro método;
+  - `reading.method` / `reading.methods` guardam a escolha (auditoria, fora da API);
+  - `leads.json` ilegível vira `STORAGE_ERROR` retryable.
+- Layouts aceitos: só `3x4+1` e `12x1` (os demais dão `LAYOUT_UNSUPPORTED` no 2.0). O cenário de teste da
+  leitura não leva mais `code`.
+- Tempos: boto `read_timeout` 930 s, `STALE_PROCESSING_SECONDS` 1200 s, visibility da `ecg-tasks` 960 s,
+  alarme de idade da fila 600 s, polling do app até 20 min. O worker roda `ECG_WORKER_CONCURRENCY` (4)
+  threads, para uma leitura de 50 a 190 s não segurar a fila. Uma leitura cortada pelo `stopTimeout`
+  (120 s) num deploy volta para a fila depois da visibility e é refeita.
+- Backend local: `scripts/local_server.py`, com a leitura 2.0 falsa em `scripts/local_lambdas.py` e a
+  interpretação mock do clone do `ecg-lambdas-v1` (`--lambdas-repo`).
+- A confirmar no E1, contra a lambda de verdade: o código e o formato da recusa e do erro dos cenários
+  `mock` (o fake local usa `READ_REFUSED_UNREADABLE_TRACE` / `READ_TRACE_EXTRACTION_FAILED`), onde vêm os
+  avisos do `success_with_warnings` e o tempo de cold start da imagem de 3,5 GB.
+
+O E1 abaixo foi escrito para o contrato v1: os casos de `refused`/`failure` por código passam a ser um caso
+por cenário, e entra um caso de leitura real (sem `mock`) com uma foto de ECG de verdade.
 
 
 ## D1 — Primeiro deploy em prod (executar **junto com o Gus**, cada passo confirmado)

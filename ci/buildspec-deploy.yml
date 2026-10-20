@@ -7,4 +7,4 @@ phases:
     commands:
       - . "$CODEBUILD_SRC_DIR_image/image.env"
       - export IMAGE_TAG
-      - ci/deploy.sh
+      - bash ci/deploy.sh

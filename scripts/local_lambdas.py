@@ -134,15 +134,11 @@ def handler(event, s3):
         env.scenario = scenario
         run = f"reading/{env.request_id}/{uuid.uuid4().hex[:8]}"
 
+        # Como a ecg-reading real com `mock` (conferido em 19/10): recusa e erro sem `details`.
         if scenario == "failure":
-            methods = [_method(name, "ERROR", reason="TRACE_EXTRACTION_FAILED") for name in METHODS]
-            raise ContractError("READ_TRACE_EXTRACTION_FAILED", details={"methods": methods})
+            raise ContractError("READ_TRACE_EXTRACTION_FAILED")
         if scenario == "refused":
-            gray = _png(photo.convert("L").resize((max(1, photo.width // 3), max(1, photo.height // 3))))
-            methods = [_method(name, "ABSTAINED", reason="unreadable_trace", files={
-                "json": None, "image": _put(s3, f"{run}/{name}/rejection_preview.png", gray, "image/png"),
-                "leads": None}) for name in METHODS[:1]] + [_method(name, "ABSTAINED") for name in METHODS[1:]]
-            raise ContractError("READ_REFUSED_UNREADABLE_TRACE", details={"methods": methods})
+            raise ContractError("READ_REFUSED_LOW_CONTRAST")
 
         leads = [{"name": name, "kind": "rhythm" if duration > 2.5 and layout == "3x4+1" else "panel",
                   "row": row, "col": col, "start_s": start, "duration_s": duration,

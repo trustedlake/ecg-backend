@@ -35,16 +35,16 @@ customizado no API Gateway pode entrar depois sem custo extra além do DNS), alt
 ## 3. Máquina de estados da tentativa (`ExamAttempt.status`)
 
 ```
-criado ──read──▶ leitura_processando ──▶ aguardando_validacao ──accept──▶ interpretacao_processando ──▶ concluido
+criado ──read──▶ reading ──▶ awaiting_validation ──accept──▶ interpreting ──▶ completed
                         │                        │                                │
-                        ├──▶ leitura_recusada    └──reject──▶ rejeitado_usuario   └──▶ erro_interpretacao
-                        └──▶ erro_leitura                                              (retry se retryable)
+                        ├──▶ reading_refused    └──reject──▶ user_rejected   └──▶ interpretation_error
+                        └──▶ reading_error                                              (retry se retryable)
                              (retry se retryable)
 ```
 
-- Estados finais que pedem **nova foto** (nova tentativa no mesmo exame): `leitura_recusada`,
-  `rejeitado_usuario`, `erro_leitura`/`erro_interpretacao` com `retryable=false`.
-- `retry` só é aceito em `erro_leitura` / `erro_interpretacao` com `retryable=true` (`STORAGE_ERROR`,
+- Estados finais que pedem **nova foto** (nova tentativa no mesmo exame): `reading_refused`,
+  `user_rejected`, `reading_error`/`interpretation_error` com `retryable=false`.
+- `retry` só é aceito em `reading_error` / `interpretation_error` com `retryable=true` (`STORAGE_ERROR`,
   `INTERNAL_ERROR`, `TASK_TIMEOUT`). Reexecuta a fase que falhou na mesma tentativa.
 - Tentativa presa em `*_processando` além de `STALE_PROCESSING_SECONDS` vira `erro_*` com código
   `TASK_TIMEOUT` (retryable).
@@ -54,13 +54,13 @@ criado ──read──▶ leitura_processando ──▶ aguardando_validacao �
 
 | Fase | Status da lambda | Estado da tentativa | Tela / ação |
 |---|---|---|---|
-| Leitura | `OK` | `aguardando_validacao` | Validação visual: overlay com gridline + traço, zoom, botões **Aceitar** / **Recusar** |
-| Leitura | `OK_WITH_WARNINGS` | `aguardando_validacao` | Igual, com a lista de avisos em destaque (ex.: "V2 parcial") acima dos botões |
-| Leitura | `REFUSED` | `leitura_recusada` | Motivo (`error.message`) + prévia com a região destacada + **Tirar nova foto** |
-| Leitura | `ERROR` | `erro_leitura` | Mensagem específica; **Tentar de novo** se `retryable`, senão **Tirar nova foto** |
-| Interpretação | `OK` | `concluido` | Resultado: resumo (classificação, headline, ritmo, FC, achados) + detalhado expansível + disclaimer |
-| Interpretação | `OK_WITH_WARNINGS` | `concluido` | Igual, com os avisos visíveis no topo do resultado |
-| Interpretação | `ERROR` | `erro_interpretacao` | Mensagem específica; **Tentar de novo** se `retryable`, senão **Tirar nova foto** |
+| Leitura | `OK` | `awaiting_validation` | Validação visual: overlay com gridline + traço, zoom, botões **Aceitar** / **Recusar** |
+| Leitura | `OK_WITH_WARNINGS` | `awaiting_validation` | Igual, com a lista de avisos em destaque (ex.: "V2 parcial") acima dos botões |
+| Leitura | `REFUSED` | `reading_refused` | Motivo (`error.message`) + prévia com a região destacada + **Tirar nova foto** |
+| Leitura | `ERROR` | `reading_error` | Mensagem específica; **Tentar de novo** se `retryable`, senão **Tirar nova foto** |
+| Interpretação | `OK` | `completed` | Resultado: resumo (classificação, headline, ritmo, FC, achados) + detalhado expansível + disclaimer |
+| Interpretação | `OK_WITH_WARNINGS` | `completed` | Igual, com os avisos visíveis no topo do resultado |
+| Interpretação | `ERROR` | `interpretation_error` | Mensagem específica; **Tentar de novo** se `retryable`, senão **Tirar nova foto** |
 | Qualquer | falha de rede/backend (5xx, timeout) | — | Mensagem genérica + **Tentar de novo** (não perde o estado: o app reconsulta a tentativa) |
 | Qualquer | fora do horário (503 do API Gateway, D8) | — | Aviso "Serviço disponível de segunda a sexta, das 8h às 20h" |
 

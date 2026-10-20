@@ -31,11 +31,11 @@ class BaseAPITestCase(APITestCase):
         p = Patient.objects.create(doctor=doctor or self.user, name="Ana", age=30, sex="F")
         return Exam.objects.create(patient=p, doctor=doctor or self.user, reason="rotina")
 
-    def _attempt(self, exam, status_=ExamStatus.CRIADO, **kwargs):
-        kwargs.setdefault("calibracao", {"speed_mm_s": 25, "gain_mm_mv": 10})
+    def _attempt(self, exam, status_=ExamStatus.CREATED, **kwargs):
+        kwargs.setdefault("calibration", {"speed_mm_s": 25, "gain_mm_mv": 10})
         return ExamAttempt.objects.create(
             exam=exam, status=status_,
-            imagem_s3_key=f"{exam.id}/a/original.png", **kwargs,
+            image_s3_key=f"{exam.id}/a/original.png", **kwargs,
         )
 
 
@@ -45,7 +45,7 @@ class ExamListCreateTest(BaseAPITestCase):
             "name": "Carlos", "age": 45, "sex": "M", "reason": "dor torácica",
         }, format="json")
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["status"], ExamStatus.CRIADO)
+        self.assertEqual(resp.data["status"], ExamStatus.CREATED)
         self.assertEqual(resp.data["patient"]["name"], "Carlos")
         self.assertEqual(resp.data["patient"]["sex"], "M")
         self.assertEqual(Patient.objects.get().sex, "M")
@@ -132,10 +132,10 @@ class AttemptCreateTest(BaseAPITestCase):
         self.assertEqual(resp.data["upload_headers"], {"Content-Type": "image/jpeg"})
         attempt = ExamAttempt.objects.get()
         self.assertEqual(str(attempt.id), resp.data["attempt_id"])
-        self.assertTrue(attempt.imagem_s3_key.endswith(f"/{exam.id}/{attempt.id}/original.jpg"))
-        self.assertEqual(attempt.status, ExamStatus.CRIADO)
+        self.assertTrue(attempt.image_s3_key.endswith(f"/{exam.id}/{attempt.id}/original.jpg"))
+        self.assertEqual(attempt.status, ExamStatus.CREATED)
         self.assertEqual(attempt.layout, "3x4+1")
-        self.assertEqual(attempt.calibracao, {"speed_mm_s": 25, "gain_mm_mv": 10})
+        self.assertEqual(attempt.calibration, {"speed_mm_s": 25, "gain_mm_mv": 10})
         self.assertIsNone(attempt.test_scenario)
         self.assertEqual(put.call_args.kwargs["content_type"], "image/jpeg")
 
@@ -162,7 +162,7 @@ class AttemptCreateTest(BaseAPITestCase):
         exam = self._exame()
         resp = self._post(exam, speed_mm_s=12.5, gain_mm_mv=20)
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(ExamAttempt.objects.get().calibracao, {"speed_mm_s": 12.5, "gain_mm_mv": 20})
+        self.assertEqual(ExamAttempt.objects.get().calibration, {"speed_mm_s": 12.5, "gain_mm_mv": 20})
         self.assertEqual(self._post(exam, speed_mm_s=50.0, gain_mm_mv=5.0).status_code, 201)
         for field, value in (("speed_mm_s", 100), ("speed_mm_s", 5), ("gain_mm_mv", 1), ("gain_mm_mv", 2)):
             resp = self._post(exam, **{field: value})
@@ -188,12 +188,12 @@ class AttemptCreateTest(BaseAPITestCase):
 
     def test_new_attempt_resets_exam_status(self, _put):
         exam = self._exame()
-        self._attempt(exam, ExamStatus.LEITURA_RECUSADA)
-        exam.status = ExamStatus.LEITURA_RECUSADA
+        self._attempt(exam, ExamStatus.READING_REFUSED)
+        exam.status = ExamStatus.READING_REFUSED
         exam.save()
         self.assertEqual(self._post(exam).status_code, 201)
         exam.refresh_from_db()
-        self.assertEqual(exam.status, ExamStatus.CRIADO)
+        self.assertEqual(exam.status, ExamStatus.CREATED)
 
     def test_foreign_exam_not_found(self, _put):
         exam = self._exame(doctor=self.other)

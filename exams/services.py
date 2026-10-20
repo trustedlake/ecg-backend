@@ -111,9 +111,9 @@ def presign_get_url(bucket, key, expires_in):
 
 
 def original_image_url(attempt, expires_in):
-    if not attempt.imagem_s3_key:
+    if not attempt.image_s3_key:
         return None
-    return presign_get_url(settings.AWS_IMAGES_BUCKET, attempt.imagem_s3_key, expires_in)
+    return presign_get_url(settings.AWS_IMAGES_BUCKET, attempt.image_s3_key, expires_in)
 
 
 def _read_json_from_s3(bucket, key):
@@ -296,8 +296,8 @@ def transition(attempt, from_statuses, to_status, updated_before=None, **fields)
 
 # Fase → (estado em processamento, estado de erro, campo JSON do bloco da fase).
 PHASES = {
-    "read": (ExamStatus.LEITURA_PROCESSANDO, ExamStatus.ERRO_LEITURA, "reading"),
-    "interpret": (ExamStatus.INTERPRETACAO_PROCESSANDO, ExamStatus.ERRO_INTERPRETACAO, "interpretation"),
+    "read": (ExamStatus.READING, ExamStatus.READING_ERROR, "reading"),
+    "interpret": (ExamStatus.INTERPRETING, ExamStatus.INTERPRETATION_ERROR, "interpretation"),
 }
 
 
@@ -378,11 +378,11 @@ def build_reading_payload(attempt):
     payload = {
         "contract_version": CONTRACT_VERSION,
         "request_id": str(attempt.id),
-        "image": {"bucket": settings.AWS_IMAGES_BUCKET, "key": attempt.imagem_s3_key},
+        "image": {"bucket": settings.AWS_IMAGES_BUCKET, "key": attempt.image_s3_key},
         "layout": attempt.layout,
     }
-    if attempt.calibracao:
-        payload["calibration"] = attempt.calibracao
+    if attempt.calibration:
+        payload["calibration"] = attempt.calibration
     mock = (attempt.test_scenario or {}).get("read")
     if mock:
         payload["mock"] = mock
@@ -469,7 +469,7 @@ def _read_success(envelope, reading, request_id):
 
 def run_reading(attempt):
     """Fase de leitura (contrato 2.0). Grava `attempt.reading` e move para
-    aguardando_validacao / leitura_recusada / erro_leitura. Devolve o status final."""
+    awaiting_validation / reading_refused / reading_error. Devolve o status final."""
     request_id = str(attempt.id)
     envelope = invoke_contract(settings.AWS_LAMBDA_ECG_READING, build_reading_payload(attempt), "read")
     status = envelope["status"]
@@ -478,7 +478,7 @@ def run_reading(attempt):
     if status in SUCCESS_STATUSES:
         reading = _read_success(envelope, reading, request_id)
         if reading["error"] is None:
-            _finish(attempt, "read", ExamStatus.AGUARDANDO_VALIDACAO, reading=reading)
+            _finish(attempt, "read", ExamStatus.AWAITING_VALIDATION, reading=reading)
             return attempt.status
 
     elif status == STATUS_REFUSED:
@@ -489,7 +489,7 @@ def run_reading(attempt):
         reading["artifacts"]["refusal_preview"] = _refusal_preview(details, request_id)
         reading["refusal_region_px"] = _region_px(details.get("region_px"))
         reading["methods"] = _methods_summary(details.get("methods"))
-        _finish(attempt, "read", ExamStatus.LEITURA_RECUSADA, reading=reading)
+        _finish(attempt, "read", ExamStatus.READING_REFUSED, reading=reading)
         return attempt.status
 
     else:
@@ -498,7 +498,7 @@ def run_reading(attempt):
         reading["error"] = _public_error(error)
         reading["methods"] = _methods_summary(details.get("methods"))
 
-    _finish(attempt, "read", ExamStatus.ERRO_LEITURA, reading=reading)
+    _finish(attempt, "read", ExamStatus.READING_ERROR, reading=reading)
     return attempt.status
 
 
@@ -517,8 +517,8 @@ def _interpretation_record(envelope):
 def run_interpretation(attempt):
     """Fase de interpretação (contrato §3). Só a partir de uma leitura OK/OK_WITH_WARNINGS.
 
-    Grava `attempt.interpretation` (+ `Report` no sucesso) e move para concluido /
-    erro_interpretacao. Devolve o status final.
+    Grava `attempt.interpretation` (+ `Report` no sucesso) e move para completed /
+    interpretation_error. Devolve o status final.
     """
     reading = attempt.reading or {}
     signal_ref = (reading.get("artifacts") or {}).get("signal")
@@ -563,7 +563,7 @@ def run_interpretation(attempt):
             meta = record["meta"]
             classification = summary.get("classification")
             with transaction.atomic():
-                if not _finish(attempt, "interpret", ExamStatus.CONCLUIDO, interpretation=record):
+                if not _finish(attempt, "interpret", ExamStatus.COMPLETED, interpretation=record):
                     return attempt.status
                 Report.objects.update_or_create(
                     attempt=attempt,
@@ -579,7 +579,7 @@ def run_interpretation(attempt):
                 )
             return attempt.status
 
-    _finish(attempt, "interpret", ExamStatus.ERRO_INTERPRETACAO, interpretation=_interpretation_record(envelope))
+    _finish(attempt, "interpret", ExamStatus.INTERPRETATION_ERROR, interpretation=_interpretation_record(envelope))
     return attempt.status
 
 
@@ -636,10 +636,10 @@ def attempt_interpretation_view(attempt):
 
 
 def phase_error(attempt):
-    """Erro da fase que falhou (`erro_leitura` → reading, `erro_interpretacao` → interpretation)."""
-    if attempt.status == ExamStatus.ERRO_LEITURA:
+    """Erro da fase que falhou (`reading_error` → reading, `interpretation_error` → interpretation)."""
+    if attempt.status == ExamStatus.READING_ERROR:
         return (attempt.reading or {}).get("error")
-    if attempt.status == ExamStatus.ERRO_INTERPRETACAO:
+    if attempt.status == ExamStatus.INTERPRETATION_ERROR:
         return (attempt.interpretation or {}).get("error")
     return None
 
@@ -647,11 +647,11 @@ def phase_error(attempt):
 def attempt_flags(attempt):
     """`can_retry` / `needs_new_photo` do fluxo §3."""
     status = attempt.status
-    if status in (ExamStatus.ERRO_LEITURA, ExamStatus.ERRO_INTERPRETACAO):
+    if status in (ExamStatus.READING_ERROR, ExamStatus.INTERPRETATION_ERROR):
         error = phase_error(attempt) or {}
         # Sem erro registrado (não deveria acontecer) vale tentar de novo.
         retryable = error.get("retryable", True) is True
         return {"can_retry": retryable, "needs_new_photo": not retryable}
-    if status in (ExamStatus.LEITURA_RECUSADA, ExamStatus.REJEITADO_USUARIO):
+    if status in (ExamStatus.READING_REFUSED, ExamStatus.USER_REJECTED):
         return {"can_retry": False, "needs_new_photo": True}
     return {"can_retry": False, "needs_new_photo": False}

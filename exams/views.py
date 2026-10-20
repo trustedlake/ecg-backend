@@ -92,14 +92,14 @@ class AttemptCreateView(APIView):
         attempt = ExamAttempt.objects.create(
             id=attempt_id,
             exam=exam,
-            status=ExamStatus.CRIADO,
-            imagem_s3_key=key,
+            status=ExamStatus.CREATED,
+            image_s3_key=key,
             layout=data["layout"],
-            calibracao={"speed_mm_s": data["speed_mm_s"], "gain_mm_mv": data["gain_mm_mv"]},
+            calibration={"speed_mm_s": data["speed_mm_s"], "gain_mm_mv": data["gain_mm_mv"]},
             test_scenario=data.get("test_scenario"),
         )
         # O exame espelha a tentativa mais recente.
-        exam.status = ExamStatus.CRIADO
+        exam.status = ExamStatus.CREATED
         exam.save(update_fields=["status", "updated_at"])
 
         upload_url = services.presign_put_url(
@@ -182,7 +182,7 @@ class AttemptReadView(AttemptActionView):
 
     def post(self, request, exam_id, attempt_id):
         attempt = self.get_attempt(request, exam_id, attempt_id)
-        return self.start_phase(attempt, "read", ExamStatus.CRIADO)
+        return self.start_phase(attempt, "read", ExamStatus.CREATED)
 
 
 class AttemptAcceptView(AttemptActionView):
@@ -190,7 +190,7 @@ class AttemptAcceptView(AttemptActionView):
 
     def post(self, request, exam_id, attempt_id):
         attempt = self.get_attempt(request, exam_id, attempt_id)
-        return self.start_phase(attempt, "interpret", ExamStatus.AGUARDANDO_VALIDACAO)
+        return self.start_phase(attempt, "interpret", ExamStatus.AWAITING_VALIDATION)
 
 
 class AttemptRejectView(AttemptActionView):
@@ -198,7 +198,7 @@ class AttemptRejectView(AttemptActionView):
 
     def post(self, request, exam_id, attempt_id):
         attempt = self.get_attempt(request, exam_id, attempt_id)
-        if not services.transition(attempt, ExamStatus.AGUARDANDO_VALIDACAO, ExamStatus.REJEITADO_USUARIO):
+        if not services.transition(attempt, ExamStatus.AWAITING_VALIDATION, ExamStatus.USER_REJECTED):
             return _invalid_state(attempt)
         return self.respond(attempt)
 
@@ -210,7 +210,7 @@ class AttemptRetryView(AttemptActionView):
         attempt = self.get_attempt(request, exam_id, attempt_id)
         if not services.attempt_flags(attempt)["can_retry"]:
             return _invalid_state(attempt)
-        phase = "read" if attempt.status == ExamStatus.ERRO_LEITURA else "interpret"
+        phase = "read" if attempt.status == ExamStatus.READING_ERROR else "interpret"
         return self.start_phase(attempt, phase, attempt.status)
 
 

@@ -12,7 +12,7 @@ class PatientAdmin(admin.ModelAdmin):
 
 class AttemptInline(admin.TabularInline):
     model = ExamAttempt
-    fields = ["status", "layout", "imagem_s3_key", "created_at"]
+    fields = ["status", "layout", "image_s3_key", "created_at"]
     readonly_fields = ["created_at"]
     extra = 0
 
@@ -29,7 +29,7 @@ class ExamAdmin(admin.ModelAdmin):
 class ExamAttemptAdmin(admin.ModelAdmin):
     list_display = ["id", "exam", "status", "layout", "created_at"]
     list_filter = ["status", "layout", "created_at"]
-    search_fields = ["exam__patient__name", "imagem_s3_key"]
+    search_fields = ["exam__patient__name", "image_s3_key"]
     readonly_fields = ["created_at", "updated_at"]
 
 

@@ -70,11 +70,11 @@ Erros de estado: 409 `{"detail": "…", "code": "invalid_state"}`.
 | `POST /api/exams/` | sim | `{patient_id}` **ou** `{name, age, sex:"F"\|"M"}`, `reason?` | `201 Exam` |
 | `GET /api/exams/<exam_id>/` | sim | — | `Exam` com `attempts[]` (cada um = `Attempt` completo) |
 | `POST /api/exams/<exam_id>/attempts/` | sim | `{filename, content_type: image/jpeg\|image/png\|image/webp, layout, speed_mm_s?, gain_mm_mv?, test_scenario?}` | `201 {attempt_id, upload_url, upload_headers:{"Content-Type": …}}` |
-| `POST /api/exams/<exam_id>/attempts/<id>/read/` | sim | — | `202 Attempt` (`leitura_processando`). 409 se não estiver em `criado` |
+| `POST /api/exams/<exam_id>/attempts/<id>/read/` | sim | — | `202 Attempt` (`reading`). 409 se não estiver em `created` |
 | `GET /api/exams/<exam_id>/attempts/<id>/` | sim | — | `Attempt` (é o endpoint de polling) |
-| `POST …/attempts/<id>/accept/` | sim | — | `202 Attempt` (`interpretacao_processando`). 409 se não estiver em `aguardando_validacao` |
-| `POST …/attempts/<id>/reject/` | sim | — | `200 Attempt` (`rejeitado_usuario`). 409 idem |
-| `POST …/attempts/<id>/retry/` | sim | — | `202 Attempt`. Só em `erro_leitura`/`erro_interpretacao` com `retryable=true`; senão 409 |
+| `POST …/attempts/<id>/accept/` | sim | — | `202 Attempt` (`interpreting`). 409 se não estiver em `awaiting_validation` |
+| `POST …/attempts/<id>/reject/` | sim | — | `200 Attempt` (`user_rejected`). 409 idem |
+| `POST …/attempts/<id>/retry/` | sim | — | `202 Attempt`. Só em `reading_error`/`interpretation_error` com `retryable=true`; senão 409 |
 | `POST /api/attempts/<id>/feedback/` | sim | `{issues[], description}` | já existe, manter |
 
 `test_scenario` (opcional): `{"read": {"scenario": "success|success_with_warnings|failure|refused", "code"?: "…"},
@@ -166,19 +166,19 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 >    Remover `AWS_LAMBDA_ECG_ANALYSER` de `config/settings.py` e criar `AWS_LAMBDA_ECG_READING`
 >    (padrão `ecg-reading-mock`) e `AWS_LAMBDA_ECG_INTERPRETATION` (padrão `ecg-interpretation-mock`), mais
 >    `ECG_TEST_SCENARIOS_ENABLED` (bool, padrão False).
-> 2. **Estados** (`ExamStatus`): substituir pelos da seção 3 do fluxo: `criado`, `leitura_processando`,
->    `aguardando_validacao`, `leitura_recusada`, `erro_leitura`, `rejeitado_usuario`,
->    `interpretacao_processando`, `concluido`, `erro_interpretacao`. Migration de dados mapeando os antigos:
->    `fase_a_processando→erro_leitura`, `aguardando_aprovacao→aguardando_validacao`,
->    `aprovado|concluido→concluido`, `rejeitado→rejeitado_usuario`, `fase_b_processando→erro_interpretacao`,
->    `erro→erro_leitura` (em `Exam` e `ExamAttempt`).
+> 2. **Estados** (`ExamStatus`): substituir pelos da seção 3 do fluxo: `created`, `reading`,
+>    `awaiting_validation`, `reading_refused`, `reading_error`, `user_rejected`,
+>    `interpreting`, `completed`, `interpretation_error`. Migration de dados mapeando os antigos:
+>    `fase_a_processando→reading_error`, `aguardando_aprovacao→awaiting_validation`,
+>    `aprovado|completed→completed`, `rejeitado→user_rejected`, `fase_b_processando→interpretation_error`,
+>    `erro→reading_error` (em `Exam` e `ExamAttempt`).
 > 3. **`Patient`**: trocar `gender` por `sex` (`CharField(max_length=1, choices F/M, null=True)` — nulo só para
 >    legado). Migration de dados: `F/f/feminino/female/mulher→F`, `M/m/masculino/male/homem→M`, resto→NULL.
 > 4. **`ExamAttempt`**: adicionar `layout` (choices = 6 layouts do contrato 2.2), `reading` (JSONField null),
 >    `interpretation` (JSONField null), `test_scenario` (JSONField null). Remover os campos do pipeline antigo:
 >    `image_type`, `mascara_s3_key`, `overlay_trace_s3_key`, `overlay_signal_s3_key`, `sinais`, `lead_labels`,
 >    `rhythm_index`, `fidelidade`, `fidelidade_por_derivacao` e o enum `FidelityVerdict`. Manter
->    `imagem_s3_key` e `calibracao`. Remover `Exam.ecg_layout` (o layout passa a ser por tentativa).
+>    `image_s3_key` e `calibration`. Remover `Exam.ecg_layout` (o layout passa a ser por tentativa).
 >    Formato que B2 vai gravar em `reading`: `{status, warnings, error, meta, grid, leads:[{name,kind,quality,coverage}],
 >    artifacts:{overlay:{bucket,key}, signal:{bucket,key}, refusal_preview:{bucket,key}|null}, refusal_region_px}`;
 >    em `interpretation`: `{status, warnings, error, meta}`. Documente isso num docstring do modelo.
@@ -215,8 +215,8 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 
 > Repo: `ecg-backend`, branch do card (ver `docs/plano-migracao-v1.md` §0). Leia antes: plano §0/§0.1,
 > `docs/fluxo-usuario-v1.md` §3–4, `CONTRATO_LAMBDAS.md` inteiro, `mock_lambdas/ecg_contract/__init__.py`
-> (catálogo de códigos). A etapa B1 já trocou os modelos: `ExamAttempt` tem `layout`, `calibracao`,
-> `imagem_s3_key`, `reading` (JSON), `interpretation` (JSON), `test_scenario` (JSON); `Patient.sex` é F/M;
+> (catálogo de códigos). A etapa B1 já trocou os modelos: `ExamAttempt` tem `layout`, `calibration`,
+> `image_s3_key`, `reading` (JSON), `interpretation` (JSON), `test_scenario` (JSON); `Patient.sex` é F/M;
 > `Report` tem `classification`, `summary`, `details`, `disclaimer`, `warnings`, `engine`, `engine_version`;
 > os estados são os da seção 3 do fluxo. Confira o código real antes de começar.
 >
@@ -232,18 +232,18 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 >      `INTERNAL_ERROR`, `retryable: true`, mensagem pt-BR genérica. Timeout de leitura do cliente =
 >      `AWS_LAMBDA_READ_TIMEOUT`, `retries.max_attempts=0` (não reinvocar sozinho).
 > 3. `run_reading(attempt)`: monta o payload 2.1 (`request_id=str(attempt.id)`, `image={bucket: AWS_IMAGES_BUCKET,
->    key: attempt.imagem_s3_key}`, `layout`, `calibration`, `mock` = `attempt.test_scenario["read"]` só se
+>    key: attempt.image_s3_key}`, `layout`, `calibration`, `mock` = `attempt.test_scenario["read"]` só se
 >    existir), invoca `AWS_LAMBDA_ECG_READING` e aplica o resultado:
 >    - OK/OK_WITH_WARNINGS → valida que `artifacts.overlay` e `artifacts.signal` estão no bucket
 >      `AWS_RESULTS_BUCKET` e com prefixo `reading/<attempt.id>/` (senão trata como `INTERNAL_ERROR`); grava em
->      `attempt.reading` o resumo (sem `samples`!) e muda para `aguardando_validacao`.
+>      `attempt.reading` o resumo (sem `samples`!) e muda para `awaiting_validation`.
 >    - REFUSED → grava `error` + `details.preview` (mesma validação de bucket/prefixo) + `details.region_px`;
->      estado `leitura_recusada`.
->    - ERROR → grava `error`; estado `erro_leitura`.
+>      estado `reading_refused`.
+>    - ERROR → grava `error`; estado `reading_error`.
 > 4. `run_interpretation(attempt)`: só a partir de leitura OK*. Baixa `artifacts.signal` do S3 (JSON), monta o
 >    payload 3.1 com `patient.sex = attempt.exam.patient.sex` (se nulo → `ERROR` local `SEX_MISSING`, sem
 >    invocar) e `mock = test_scenario["interpret"]` se houver. OK* → cria/atualiza `Report` e estado
->    `concluido`; ERROR → `erro_interpretacao`. Grava `attempt.interpretation`. Falha ao baixar o sinal →
+>    `completed`; ERROR → `interpretation_error`. Grava `attempt.interpretation`. Falha ao baixar o sinal →
 >    `STORAGE_ERROR` retryable.
 > 5. Funções de leitura para a API: `attempt_reading_view(attempt)` e `attempt_interpretation_view(attempt)` que
 >    devolvem os blocos `reading`/`interpretation` do objeto `Attempt` do §0.1, gerando as presigned URLs na
@@ -277,7 +277,7 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 >      `inline` (padrão; executa na hora, usado em dev e testes) ou `sqs` (usa boto3 `sqs.send_message` na fila
 >      `settings.ECG_TASK_QUEUE_URL`, env `ECG_TASK_QUEUE_URL`, corpo JSON `{"ecg_task": task, "attempt_id": "<uuid>"}`;
 >      quem consome é o worker da etapa B4, que roda em outro container). Se o dispatch falhar,
->      a tentativa vai para `erro_leitura`/`erro_interpretacao` com `INTERNAL_ERROR` retryable.
+>      a tentativa vai para `reading_error`/`interpretation_error` com `INTERNAL_ERROR` retryable.
 >    - `run_task(task, attempt_id)`: carrega a tentativa e só executa se ela estiver no estado `*_processando`
 >      correspondente (idempotente: evento duplicado não roda duas vezes). Chama `run_reading`/`run_interpretation`.
 >      Nunca levanta exceção para fora (loga e marca erro).
@@ -292,9 +292,9 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 >    "message":"O processamento demorou mais que o esperado. Tente de novo."}` gravado no bloco da fase.
 > 4. Isolamento: toda rota de exame/tentativa filtra por `doctor=request.user` (404 para outro usuário).
 > 5. Testes de API (`exams/test_api.py`, modo `inline`, lambdas mockadas no nível do boto3 ou de
->    `services.invoke_contract`): fluxo feliz até `concluido`; com avisos; recusa; erro retryable + `retry`;
->    erro não retryable + `retry` → 409; `reject` → `rejeitado_usuario` e nova tentativa no mesmo exame volta o
->    exam para `criado`; erro de interpretação + `retry`; duplo `read/` → 409; acesso de outro usuário → 404;
+>    `services.invoke_contract`): fluxo feliz até `completed`; com avisos; recusa; erro retryable + `retry`;
+>    erro não retryable + `retry` → 409; `reject` → `user_rejected` e nova tentativa no mesmo exame volta o
+>    exam para `created`; erro de interpretação + `retry`; duplo `read/` → 409; acesso de outro usuário → 404;
 >    `TASK_TIMEOUT`; `config` com e sem staff/flag; `health` sem token; modo `sqs` de `dispatch` chamando
 >    `send_message` na fila certa com o corpo certo.
 >
@@ -302,7 +302,7 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 > `runserver` + SQLite percorrendo criar exame → criar tentativa (pode pular o PUT real) funciona.
 >
 > **Relatório a devolver:** tabela de rotas implementadas (método, rota, status codes); exemplo real de JSON do
-> `GET attempt` em `aguardando_validacao` e em `concluido` (tirado de um teste); como a idempotência do
+> `GET attempt` em `awaiting_validation` e em `completed` (tirado de um teste); como a idempotência do
 > `run_task` foi garantida; desvios do §0.1 (se houver, justifique); testes novos.
 
 ---
@@ -452,21 +452,21 @@ Variável `task_cpu`: com 256 (0,25 vCPU) o Fargate cai para ~$5,29 (total ≈ U
 > navegação, login, exames, novo exame, captura, layout e `ProcessingScreen` (que navega com um placeholder);
 > confira o código real. Agora as telas de desfecho:
 >
-> 1. `ValidationScreen` (`aguardando_validacao`): imagem `reading.overlay_url` (gridline + traço) com zoom de
+> 1. `ValidationScreen` (`awaiting_validation`): imagem `reading.overlay_url` (gridline + traço) com zoom de
 >    pelo menos 3× e arraste nas três plataformas (iOS, Android, web); avisos (`reading.warnings`) em destaque
 >    acima dos botões; qualidade por derivação (`reading.leads`, chips good/partial/saturated/low); botões
 >    **Aceitar leitura** (→ `accept` → `ProcessingScreen` de interpretação) e **Recusar** (confirmação → `reject`
 >    → oferece nova foto no mesmo exame).
-> 2. `RefusedScreen` (`leitura_recusada`): `error.message`, prévia `refusal_preview_url` (destacar
+> 2. `RefusedScreen` (`reading_refused`): `error.message`, prévia `refusal_preview_url` (destacar
 >    `refusal_region_px` se a prévia não vier), dicas por código (`READ_REFUSED_BLURRY` → "apoie o celular…",
 >    etc., para os 6 códigos), botão **Tirar nova foto**.
-> 3. `ErrorScreen` (`erro_leitura` / `erro_interpretacao` e falhas de rede): mensagem específica; **Tentar de
+> 3. `ErrorScreen` (`reading_error` / `interpretation_error` e falhas de rede): mensagem específica; **Tentar de
 >    novo** (`retry`) se `can_retry`, senão **Tirar nova foto** (`needs_new_photo`). Erro de rede → reconsulta
 >    a tentativa (não perde estado). **Fora do horário** (o backend fica desligado seg–sex 20h–08h e fim de
 >    semana; o API Gateway devolve 503 sem corpo JSON do Django): qualquer 503 cujo corpo não seja JSON do
 >    backend → aviso "Serviço disponível de segunda a sexta, das 8h às 20h" (texto em constante única), sem
 >    botão de retry automático em loop. Inclui a tela de login.
-> 4. `ResultScreen` (`concluido`): resumo em destaque (cor/ícone por `classification`, `headline`, ritmo, FC,
+> 4. `ResultScreen` (`completed`): resumo em destaque (cor/ícone por `classification`, `headline`, ritmo, FC,
 >    `key_findings`, `text`); avisos da interpretação e da leitura no topo; detalhado expansível: medidas
 >    (tabela com valor, unidade e confiança; `null` = "não medível"), achados (com severidade), critérios (badge
 >    "depende do sexo" quando `sex_specific`; status normal/abnormal/not_evaluated), por derivação; `disclaimer`

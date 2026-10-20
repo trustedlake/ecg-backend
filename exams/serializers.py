@@ -92,7 +92,7 @@ class AttemptSerializer(serializers.ModelSerializer):
     """Objeto `Attempt` da API (plano §0.1). URLs presigned geradas a cada resposta."""
 
     exam_id = serializers.UUIDField(read_only=True)
-    calibration = serializers.JSONField(source="calibracao")
+    calibration = serializers.JSONField()
     original_image_url = serializers.SerializerMethodField()
     reading = serializers.SerializerMethodField()
     interpretation = serializers.SerializerMethodField()

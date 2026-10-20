@@ -41,7 +41,7 @@ def main():
         attempt=api('POST',f'/api/exams/{eid}/attempts/',json={'filename':pathlib.Path(image).name,'content_type':'image/png','speed_mm_s':25,'gain_mm_mv':10})
         aid=attempt['attempt_id']
         attempt_id=aid
-        uploaded_image_key=attempt['imagem_s3_key']
+        uploaded_image_key=attempt['image_s3_key']
         b=pathlib.Path(image).read_bytes()
         r=requests.put(attempt['upload_url'],data=b,headers={'Content-Type':'image/png'},timeout=90)
         r.raise_for_status()

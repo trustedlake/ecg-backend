@@ -120,7 +120,7 @@ class HappyPathTest(FlowTestCase):
         resp = self.post("attempt-read", aid)
         self.assertEqual(resp.status_code, 202)
         data = resp.data
-        self.assertEqual(data["status"], ExamStatus.AGUARDANDO_VALIDACAO)
+        self.assertEqual(data["status"], ExamStatus.AWAITING_VALIDATION)
         self.assertEqual(set(data), {
             "id", "exam_id", "status", "layout", "calibration", "original_image_url", "reading",
             "interpretation", "can_retry", "needs_new_photo", "created_at", "updated_at"})
@@ -131,22 +131,22 @@ class HappyPathTest(FlowTestCase):
         self.assertTrue(data["original_image_url"].startswith("https://signed/"))
         self.assertIsNone(data["interpretation"])
         self.assertNotIn("samples", json.dumps(data))
-        self.assertEqual(self.exam_status(), ExamStatus.AGUARDANDO_VALIDACAO)
+        self.assertEqual(self.exam_status(), ExamStatus.AWAITING_VALIDATION)
 
         resp = self.post("attempt-accept", aid)
         self.assertEqual(resp.status_code, 202)
         data = self.get_attempt(aid)
-        self.assertEqual(data["status"], ExamStatus.CONCLUIDO)
+        self.assertEqual(data["status"], ExamStatus.COMPLETED)
         self.assertEqual(data["interpretation"]["summary"]["heart_rate_bpm"], 72)
         self.assertEqual(data["interpretation"]["disclaimer"], "Não substitui o laudo de um médico.")
         self.assertEqual((data["can_retry"], data["needs_new_photo"]), (False, False))
-        self.assertEqual(self.exam_status(), ExamStatus.CONCLUIDO)
+        self.assertEqual(self.exam_status(), ExamStatus.COMPLETED)
         self.assertEqual(self.calls[1][1]["patient"], {"sex": "F"})
         # O leads.json vai como signal, com a taxa do método escolhido (contrato 2.0 §4).
         self.assertEqual(self.calls[1][1]["signal"], {**SIGNAL, "sampling_rate_hz": 150.0, "units": "mV"})
 
         detail = self.client.get(reverse("exam-detail", args=[self.exam.id])).data
-        self.assertEqual(detail["attempts"][0]["status"], ExamStatus.CONCLUIDO)
+        self.assertEqual(detail["attempts"][0]["status"], ExamStatus.COMPLETED)
 
     def test_with_warnings(self):
         aid = self.new_attempt()
@@ -158,7 +158,7 @@ class HappyPathTest(FlowTestCase):
         self.assertEqual(data["reading"]["status"], "OK_WITH_WARNINGS")
         self.assertEqual(data["reading"]["warnings"], rw)
         data = self.post("attempt-accept", aid).data
-        self.assertEqual(data["status"], ExamStatus.CONCLUIDO)
+        self.assertEqual(data["status"], ExamStatus.COMPLETED)
         self.assertEqual(data["interpretation"]["warnings"], iw)
 
     def test_double_read_is_409(self):
@@ -184,7 +184,7 @@ class RefusalAndRejectionTest(FlowTestCase):
             details={"region_px": [1, 2, 3, 4],
                      "preview": {"bucket": RESULTS, "key": f"reading/{rid}/r/refusal_preview.png"}})}
         data = self.post("attempt-read", aid).data
-        self.assertEqual(data["status"], ExamStatus.LEITURA_RECUSADA)
+        self.assertEqual(data["status"], ExamStatus.READING_REFUSED)
         self.assertEqual(data["reading"]["error"]["code"], "READ_REFUSED_BLURRY")
         self.assertEqual(data["reading"]["refusal_preview_url"], f"https://signed/reading/{aid}/r/refusal_preview.png")
         self.assertEqual(data["reading"]["refusal_region_px"], [1, 2, 3, 4])
@@ -197,13 +197,13 @@ class RefusalAndRejectionTest(FlowTestCase):
         self.post("attempt-read", aid)
         resp = self.post("attempt-reject", aid)
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["status"], ExamStatus.REJEITADO_USUARIO)
+        self.assertEqual(resp.data["status"], ExamStatus.USER_REJECTED)
         self.assertTrue(resp.data["needs_new_photo"])
-        self.assertEqual(self.exam_status(), ExamStatus.REJEITADO_USUARIO)
+        self.assertEqual(self.exam_status(), ExamStatus.USER_REJECTED)
         self.assertEqual(self.post("attempt-reject", aid).status_code, 409)
 
         self.new_attempt()
-        self.assertEqual(self.exam_status(), ExamStatus.CRIADO)
+        self.assertEqual(self.exam_status(), ExamStatus.CREATED)
         self.assertEqual(self.exam.attempts.count(), 2)
 
 
@@ -212,13 +212,13 @@ class ErrorAndRetryTest(FlowTestCase):
         aid = self.new_attempt()
         self.responses = {"read": lambda rid: error("read", rid, "STORAGE_ERROR", True, category="internal")}
         data = self.post("attempt-read", aid).data
-        self.assertEqual(data["status"], ExamStatus.ERRO_LEITURA)
+        self.assertEqual(data["status"], ExamStatus.READING_ERROR)
         self.assertEqual((data["can_retry"], data["needs_new_photo"]), (True, False))
 
         self.responses = {"read": read_ok}
         resp = self.post("attempt-retry", aid)
         self.assertEqual(resp.status_code, 202)
-        self.assertEqual(resp.data["status"], ExamStatus.AGUARDANDO_VALIDACAO)
+        self.assertEqual(resp.data["status"], ExamStatus.AWAITING_VALIDATION)
         self.assertIsNone(resp.data["reading"]["error"])
         self.assertEqual(len(self.calls), 2)
 
@@ -226,7 +226,7 @@ class ErrorAndRetryTest(FlowTestCase):
         aid = self.new_attempt()
         self.responses = {"read": lambda rid: error("read", rid, "READ_GRID_NOT_FOUND", False)}
         data = self.post("attempt-read", aid).data
-        self.assertEqual(data["status"], ExamStatus.ERRO_LEITURA)
+        self.assertEqual(data["status"], ExamStatus.READING_ERROR)
         self.assertEqual((data["can_retry"], data["needs_new_photo"]), (False, True))
         self.assertEqual(self.post("attempt-retry", aid).status_code, 409)
         self.assertEqual(len(self.calls), 1)
@@ -237,7 +237,7 @@ class ErrorAndRetryTest(FlowTestCase):
                           "interpret": lambda rid: error("interpret", rid, "INTERNAL_ERROR", True, category="internal")}
         self.post("attempt-read", aid)
         data = self.post("attempt-accept", aid).data
-        self.assertEqual(data["status"], ExamStatus.ERRO_INTERPRETACAO)
+        self.assertEqual(data["status"], ExamStatus.INTERPRETATION_ERROR)
         self.assertTrue(data["can_retry"])
         self.assertEqual(data["interpretation"]["error"]["code"], "INTERNAL_ERROR")
         self.assertEqual(data["reading"]["status"], "OK")  # a leitura é preservada
@@ -245,7 +245,7 @@ class ErrorAndRetryTest(FlowTestCase):
         self.responses["interpret"] = interp_ok
         resp = self.post("attempt-retry", aid)
         self.assertEqual(resp.status_code, 202)
-        self.assertEqual(resp.data["status"], ExamStatus.CONCLUIDO)
+        self.assertEqual(resp.data["status"], ExamStatus.COMPLETED)
         self.assertEqual([c[0] for c in self.calls], ["read", "interpret", "interpret"])
 
     def test_unexpected_exception_marks_internal_error(self):
@@ -253,7 +253,7 @@ class ErrorAndRetryTest(FlowTestCase):
         self.responses = {"read": lambda rid: 1 / 0}
         with self.assertLogs("exams.tasks", "ERROR"):
             data = self.post("attempt-read", aid).data
-        self.assertEqual(data["status"], ExamStatus.ERRO_LEITURA)
+        self.assertEqual(data["status"], ExamStatus.READING_ERROR)
         self.assertEqual(data["reading"]["error"]["code"], "INTERNAL_ERROR")
         self.assertTrue(data["can_retry"])
 
@@ -261,20 +261,20 @@ class ErrorAndRetryTest(FlowTestCase):
     def test_task_timeout(self):
         aid = self.new_attempt()
         old = timezone.now() - timedelta(seconds=601)
-        ExamAttempt.objects.filter(id=aid).update(status=ExamStatus.LEITURA_PROCESSANDO, updated_at=old)
+        ExamAttempt.objects.filter(id=aid).update(status=ExamStatus.READING, updated_at=old)
         with self.assertLogs("exams.services", "WARNING"):
             data = self.get_attempt(aid)
-        self.assertEqual(data["status"], ExamStatus.ERRO_LEITURA)
+        self.assertEqual(data["status"], ExamStatus.READING_ERROR)
         self.assertEqual(data["reading"]["error"], {
             "code": "TASK_TIMEOUT", "category": "internal", "retryable": True,
             "message": "O processamento demorou mais que o esperado. Tente de novo."})
         self.assertTrue(data["can_retry"])
-        self.assertEqual(self.exam_status(), ExamStatus.ERRO_LEITURA)
+        self.assertEqual(self.exam_status(), ExamStatus.READING_ERROR)
 
     def test_recent_processing_is_not_stale(self):
         aid = self.new_attempt()
-        ExamAttempt.objects.filter(id=aid).update(status=ExamStatus.INTERPRETACAO_PROCESSANDO)
-        self.assertEqual(self.get_attempt(aid)["status"], ExamStatus.INTERPRETACAO_PROCESSANDO)
+        ExamAttempt.objects.filter(id=aid).update(status=ExamStatus.INTERPRETING)
+        self.assertEqual(self.get_attempt(aid)["status"], ExamStatus.INTERPRETING)
 
 
 class IsolationTest(FlowTestCase):
@@ -288,7 +288,7 @@ class IsolationTest(FlowTestCase):
         for name in ("attempt-read", "attempt-accept", "attempt-reject", "attempt-retry"):
             self.assertEqual(client.post(self.url(name, aid)).status_code, 404, name)
         self.assertEqual(client.get(reverse("exam-detail", args=[self.exam.id])).status_code, 404)
-        self.assertEqual(ExamAttempt.objects.get(id=aid).status, ExamStatus.CRIADO)
+        self.assertEqual(ExamAttempt.objects.get(id=aid).status, ExamStatus.CREATED)
 
     def test_attempt_of_another_exam_is_404(self):
         aid = self.new_attempt()
@@ -377,7 +377,7 @@ class SqsDispatchTest(FlowTestCase):
         aid = self.new_attempt()
         resp = self.post("attempt-read", aid)
         self.assertEqual(resp.status_code, 202)
-        self.assertEqual(resp.data["status"], ExamStatus.LEITURA_PROCESSANDO)
+        self.assertEqual(resp.data["status"], ExamStatus.READING)
         self.sqs.send_message.assert_called_once_with(
             QueueUrl="https://sqs.sa-east-1.amazonaws.com/1/ecg-tasks",
             MessageBody=json.dumps({"ecg_task": "read", "attempt_id": aid}),
@@ -389,7 +389,7 @@ class SqsDispatchTest(FlowTestCase):
         self.assertTrue(tasks.run_task("read", aid))
         self.assertFalse(tasks.run_task("read", aid))
         self.assertEqual(len(self.calls), 1)
-        self.assertEqual(ExamAttempt.objects.get(id=aid).status, ExamStatus.AGUARDANDO_VALIDACAO)
+        self.assertEqual(ExamAttempt.objects.get(id=aid).status, ExamStatus.AWAITING_VALIDATION)
 
     def test_publish_failure_marks_retryable_error(self):
         aid = self.new_attempt()
@@ -397,7 +397,7 @@ class SqsDispatchTest(FlowTestCase):
         with self.assertLogs("exams.tasks", "ERROR"):
             resp = self.post("attempt-read", aid)
         self.assertEqual(resp.status_code, 202)
-        self.assertEqual(resp.data["status"], ExamStatus.ERRO_LEITURA)
+        self.assertEqual(resp.data["status"], ExamStatus.READING_ERROR)
         self.assertEqual(resp.data["reading"]["error"]["code"], "INTERNAL_ERROR")
         self.assertTrue(resp.data["can_retry"])
 

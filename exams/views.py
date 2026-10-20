@@ -211,7 +211,13 @@ class AttemptRetryView(AttemptActionView):
         if not services.attempt_flags(attempt)["can_retry"]:
             return _invalid_state(attempt)
         phase = "read" if attempt.status == ExamStatus.READING_ERROR else "interpret"
-        return self.start_phase(attempt, phase, attempt.status)
+        from_status = attempt.status
+        if attempt.test_scenario and phase in attempt.test_scenario:
+            # A staff-forced scenario must not repeat itself: the retry runs the real path.
+            remaining = {k: v for k, v in attempt.test_scenario.items() if k != phase}
+            attempt.test_scenario = remaining or None
+            attempt.save(update_fields=["test_scenario"])
+        return self.start_phase(attempt, phase, from_status)
 
 
 class ConfigView(APIView):

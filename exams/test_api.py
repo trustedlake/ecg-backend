@@ -314,6 +314,23 @@ class TestScenarioTest(FlowTestCase):
         self.assertEqual(self.calls[1][1]["mock"], {"scenario": "failure", "code": "INTERP_NO_QRS_DETECTED"})
 
 
+    @override_settings(ECG_TEST_SCENARIOS_ENABLED=True)
+    def test_retry_drops_the_forced_scenario_of_the_failed_phase(self):
+        self.user.is_staff = True
+        self.user.save()
+        aid = self.new_attempt(test_scenario={"read": {"scenario": "failure"}})
+        self.responses = {"read": lambda rid: error("read", rid, "READ_INTERNAL_ERROR", True, category="internal")}
+        data = self.post("attempt-read", aid).data
+        self.assertEqual(data["status"], ExamStatus.READING_ERROR)
+        self.assertEqual(self.calls[0][1]["mock"], {"scenario": "failure"})
+
+        self.responses = {"read": read_ok}
+        resp = self.post("attempt-retry", aid)
+        self.assertEqual(resp.status_code, 202)
+        self.assertEqual(resp.data["status"], ExamStatus.AWAITING_VALIDATION)
+        self.assertNotIn("mock", self.calls[1][1])
+
+
 class ConfigHealthLoginTest(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="doctor", email="m@t.local", password="pass-123",

@@ -126,13 +126,14 @@ else
   aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$new_td" >/dev/null
 fi
 log "Esperando o serviço estabilizar..."
-aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
-
-# Estável também vale para "o circuit breaker voltou para a revisão antiga": confere qual ficou.
-primary_td=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-  --query "services[0].deployments[?status=='PRIMARY'] | [0].taskDefinition" --output text)
-rollout=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-  --query "services[0].deployments[?status=='PRIMARY'] | [0].rolloutState" --output text)
+# services-stable pode voltar com o rollout ainda IN_PROGRESS (visto no primeiro deploy, com a revisão bootstrap ainda tentando subir);
+# espera o rollout da revisão primária terminar (até 20 min) e só então confere qual revisão ficou.
+for _ in $(seq 1 120); do
+  read -r primary_td rollout < <(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+    --query "services[0].deployments[?status=='PRIMARY'] | [0].[taskDefinition, rolloutState]" --output text)
+  [ "$rollout" != "IN_PROGRESS" ] && break
+  sleep 10
+done
 if [ "$primary_td" != "$new_td" ] || [ "$rollout" != "COMPLETED" ]; then
   log "Deploy não ficou na revisão nova (primária: $primary_td, $rollout). O circuit breaker reverteu."
   exit 1

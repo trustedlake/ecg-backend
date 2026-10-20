@@ -15,10 +15,11 @@ phases:
   build:
     commands:
       - |
+        set -e
         if aws ecr describe-images --repository-name "${ECR_REPOSITORY_URL#*/}" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
           echo "Imagem $IMAGE_TAG já existe no ECR; pulando build."
         else
-          scripts/build_frontend.sh "$CODEBUILD_SRC_DIR_frontend"
+          bash scripts/build_frontend.sh "$CODEBUILD_SRC_DIR_frontend"
           docker build --build-arg APP_VERSION="$IMAGE_TAG" -t "$ECR_REPOSITORY_URL:$IMAGE_TAG" .
           docker push "$ECR_REPOSITORY_URL:$IMAGE_TAG"
         fi

@@ -1,7 +1,7 @@
 from django.db import migrations
 
-# Estados do pipeline ecg-analyser → estados do contrato v1 (docs/user-flow-v1.md §3).
-# Processamento interrompido vira erro: a tentativa não tem como continuar no fluxo novo.
+# Legacy ecg-analyser pipeline states -> contract v1 states (docs/user-flow-v1.md §3).
+# Interrupted processing becomes an error: the attempt cannot continue in the new flow.
 STATUS_MAP = {
     "fase_a_processando": "erro_leitura",
     "aguardando_aprovacao": "aguardando_validacao",
@@ -38,7 +38,7 @@ def forwards(apps, schema_editor):
         for old, new in STATUS_MAP.items():
             model.objects.filter(status=old).update(status=new)
 
-    # O layout passa do exame para a tentativa.
+    # The layout moves from the exam to the attempt.
     for exam in Exam.objects.all().only("id", "ecg_layout"):
         if exam.ecg_layout in VALID_LAYOUTS:
             ExamAttempt.objects.filter(exam_id=exam.pk).update(layout=exam.ecg_layout)

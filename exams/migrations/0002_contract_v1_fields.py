@@ -2,7 +2,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    """Contrato v1: novos campos (os antigos só saem na 0004, depois da migração de dados)."""
+    """Contract v1: new fields (the old ones are only removed in 0004, after the data migration)."""
 
     dependencies = [
         ("exams", "0001_initial"),
@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="patient",
             name="sex",
-            field=models.CharField(blank=True, choices=[("F", "Feminino"), ("M", "Masculino")], max_length=1, null=True),
+            field=models.CharField(blank=True, choices=[("F", "Female"), ("M", "Male")], max_length=1, null=True),
         ),
         migrations.AddField(
             model_name="examattempt",
@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="report",
             name="classification",
-            field=models.CharField(blank=True, choices=[("normal", "Normal"), ("borderline", "Limítrofe"), ("abnormal", "Anormal")], max_length=20, null=True),
+            field=models.CharField(blank=True, choices=[("normal", "Normal"), ("borderline", "Borderline"), ("abnormal", "Abnormal")], max_length=20, null=True),
         ),
         migrations.AddField(
             model_name="report",
@@ -72,11 +72,11 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="exam",
             name="status",
-            field=models.CharField(choices=[('criado', 'Criado'), ('leitura_processando', 'Leitura processando'), ('aguardando_validacao', 'Aguardando validação'), ('leitura_recusada', 'Leitura recusada'), ('erro_leitura', 'Erro na leitura'), ('rejeitado_usuario', 'Rejeitado pelo usuário'), ('interpretacao_processando', 'Interpretação processando'), ('concluido', 'Concluído'), ('erro_interpretacao', 'Erro na interpretação')], default="criado", max_length=40),
+            field=models.CharField(choices=[('criado', 'Created'), ('leitura_processando', 'Reading in progress'), ('aguardando_validacao', 'Awaiting validation'), ('leitura_recusada', 'Reading refused'), ('erro_leitura', 'Reading error'), ('rejeitado_usuario', 'Rejected by user'), ('interpretacao_processando', 'Interpretation in progress'), ('concluido', 'Completed'), ('erro_interpretacao', 'Interpretation error')], default="criado", max_length=40),
         ),
         migrations.AlterField(
             model_name="examattempt",
             name="status",
-            field=models.CharField(choices=[('criado', 'Criado'), ('leitura_processando', 'Leitura processando'), ('aguardando_validacao', 'Aguardando validação'), ('leitura_recusada', 'Leitura recusada'), ('erro_leitura', 'Erro na leitura'), ('rejeitado_usuario', 'Rejeitado pelo usuário'), ('interpretacao_processando', 'Interpretação processando'), ('concluido', 'Concluído'), ('erro_interpretacao', 'Erro na interpretação')], default="criado", max_length=40),
+            field=models.CharField(choices=[('criado', 'Created'), ('leitura_processando', 'Reading in progress'), ('aguardando_validacao', 'Awaiting validation'), ('leitura_recusada', 'Reading refused'), ('erro_leitura', 'Reading error'), ('rejeitado_usuario', 'Rejected by user'), ('interpretacao_processando', 'Interpretation in progress'), ('concluido', 'Completed'), ('erro_interpretacao', 'Interpretation error')], default="criado", max_length=40),
         ),
     ]

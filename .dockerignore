@@ -12,13 +12,10 @@ staticfiles
 media
 docs
 infra
-infra-oracle
 scripts/local_*.py
 ci
 **/tests.py
 **/test_*.py
-smoke_e2e.py
-ECG_INTEGRATION.md
 README.md
 CONTRATO_LAMBDAS.md
 Dockerfile

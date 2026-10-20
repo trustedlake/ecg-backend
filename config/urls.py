@@ -14,6 +14,6 @@ urlpatterns = [
     path('api/auth/', include('accounts.urls')),
     path('api/', include('exams.urls')),
     path('api/', include('uploads.urls')),
-    # Por último: rotas do app web (SPA) caem no index.html; api/, admin/ e static/ não.
+    # Last: web app (SPA) routes fall back to index.html; api/, admin/ and static/ do not.
     re_path(SPA_PATH_PATTERN, spa_index),
 ]

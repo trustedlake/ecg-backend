@@ -1,5 +1,5 @@
-# PostgreSQL Single-AZ. A senha vem do SSM por um recurso ephemeral e vai em password_wo:
-# não fica no plan nem no state. Fora do horário comercial o banco é parado pelo Scheduler (I2).
+# Single-AZ PostgreSQL. The password comes from SSM through an ephemeral resource and goes into password_wo:
+# it is never in the plan or the state. Outside business hours the database is stopped by the Scheduler (I2).
 
 ephemeral "aws_ssm_parameter" "db_password" {
   arn             = "arn:aws:ssm:${var.region}:${local.account_id}:parameter${var.ssm_prefix}/DB_PASSWORD"
@@ -18,7 +18,7 @@ resource "aws_db_parameter_group" "this" {
   parameter {
     name         = "rds.force_ssl"
     value        = "1"
-    apply_method = "pending-reboot" # parâmetro estático; na criação já vale
+    apply_method = "pending-reboot" # static parameter; applies at creation
   }
 
   parameter {
@@ -50,13 +50,13 @@ resource "aws_db_instance" "this" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
 
-  # Janelas dentro do horário ligado (seg–sex 07:40–20:10 BRT = 10:40–23:10 UTC).
+  # Windows within the on-hours (Mon-Fri 10:40-23:10 UTC).
   backup_retention_period = 7
   backup_window           = "14:00-14:30"
   maintenance_window      = "wed:15:00-wed:15:30"
   copy_tags_to_snapshot   = true
 
-  # Nível gratuito (7 dias).
+  # Free tier (7 days).
   database_insights_mode                = "standard"
   performance_insights_enabled          = true
   performance_insights_retention_period = 7

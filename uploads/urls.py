@@ -5,8 +5,8 @@ from .views import UploadBatchConfirmView, UploadBatchCreateView
 urlpatterns = [
     path("uploads/", UploadBatchCreateView.as_view(), name="upload-batch-create"),
     path(
-        "uploads/<uuid:batch_id>/confirmar/",
+        "uploads/<uuid:batch_id>/confirm/",
         UploadBatchConfirmView.as_view(),
-        name="upload-batch-confirmar",
+        name="upload-batch-confirm",
     ),
 ]

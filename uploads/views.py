@@ -15,9 +15,9 @@ from .serializers import UploadBatchCreateSerializer
 
 
 class UploadBatchCreateView(APIView):
-    """POST /api/uploads/ — registra o lote (não confirmado) e devolve uma
-    presigned PUT URL por arquivo. O upload do binário é direto pro S3,
-    nunca passa pelo Django (mesmo padrão de AttemptCreateView)."""
+    """POST /api/uploads/: records the batch (unconfirmed) and returns one
+    presigned PUT URL per file. The binary upload goes straight to S3,
+    never through Django (same pattern as AttemptCreateView)."""
 
     permission_classes = [IsAuthenticated]
 
@@ -40,7 +40,7 @@ class UploadBatchCreateView(APIView):
                 batch=batch,
                 s3_key=key,
                 content_type=item.get("content_type") or None,
-                nome_original=item.get("filename") or None,
+                original_name=item.get("filename") or None,
             )
 
             upload_url = services.presign_put_url(
@@ -64,15 +64,15 @@ class UploadBatchCreateView(APIView):
 
 
 class UploadBatchConfirmView(APIView):
-    """POST /api/uploads/<batch_id>/confirmar/ — só vira o flag; não
-    reenvia nem reprocessa nenhum arquivo."""
+    """POST /api/uploads/<batch_id>/confirm/: only flips the flag; it does not
+    resend or reprocess any file."""
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request, batch_id):
         batch = get_object_or_404(UploadBatch, id=batch_id, user=request.user)
-        if not batch.confirmado:
-            batch.confirmado = True
-            batch.confirmado_em = timezone.now()
-            batch.save(update_fields=["confirmado", "confirmado_em"])
-        return Response({"batch_id": str(batch.id), "confirmado": batch.confirmado})
+        if not batch.confirmed:
+            batch.confirmed = True
+            batch.confirmed_at = timezone.now()
+            batch.save(update_fields=["confirmed", "confirmed_at"])
+        return Response({"batch_id": str(batch.id), "confirmed": batch.confirmed})

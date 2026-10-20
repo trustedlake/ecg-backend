@@ -5,7 +5,7 @@ variable "region" {
 
 variable "aws_profile" {
   type        = string
-  description = "Profile AWS local (~/.aws/credentials). No CodeBuild, deixe vazio para usar a role."
+  description = "Local AWS profile (~/.aws/credentials). In CodeBuild, leave empty to use the role."
   default     = "trustedlake"
 }
 
@@ -22,13 +22,13 @@ variable "images_bucket" {
 
 variable "results_bucket" {
   type        = string
-  description = "Bucket (existente, stack ecg-lambdas) com overlay, prévia de recusa e sinal."
+  description = "Bucket (existing, ecg-lambdas stack) with overlay, refusal preview and signal."
   default     = "ecg-lambdas-results-785236377332-sa-east-1"
 }
 
 variable "reading_lambda_name" {
   type        = string
-  description = "Lambda de leitura (contrato 2.0, ecg-lambdas-v1). Os cenários de teste vão no campo mock do payload."
+  description = "Reading lambda (contract 2.0, ecg-lambdas-v1). Test scenarios go in the payload mock field."
   default     = "ecg-reading"
 }
 
@@ -39,7 +39,7 @@ variable "interpretation_lambda_name" {
 
 variable "ssm_prefix" {
   type        = string
-  description = "Prefixo dos parâmetros SecureString criados à mão (ver README)."
+  description = "Prefix of the SecureString parameters created by hand (see README)."
   default     = "/ecg/prod"
 }
 
@@ -55,21 +55,21 @@ variable "db_instance_class" {
 
 variable "db_password_version" {
   type        = number
-  description = "Incremente para reenviar a senha do SSM ao RDS (password_wo só é aplicado quando muda)."
+  description = "Increment to resend the SSM password to RDS (password_wo is only applied when it changes)."
   default     = 1
 }
 
-# --- I2: ECS, API Gateway, horário e monitoramento ---
+# --- I2: ECS, API Gateway, schedule and monitoring ---
 
 variable "image_tag" {
   type        = string
-  description = "Tag da imagem no ECR. O pipeline (I3) registra revisões novas; o Terraform só cria a primeira."
+  description = "Image tag in ECR. The pipeline (I3) registers new revisions; Terraform only creates the first one."
   default     = "bootstrap"
 }
 
 variable "task_cpu" {
   type        = number
-  description = "CPU da task (512 = 0,5 vCPU). Subir para 1024 se o teste de carga pedir."
+  description = "Task CPU (512 = 0.5 vCPU). Raise to 1024 if the load test calls for it."
   default     = 512
 }
 
@@ -80,7 +80,7 @@ variable "task_memory" {
 
 variable "test_scenarios_enabled" {
   type        = bool
-  description = "Libera test_scenario (mock) para usuários is_staff."
+  description = "Enables test_scenario (mock) for is_staff users."
   default     = true
 }
 
@@ -92,7 +92,7 @@ variable "extra_allowed_hosts" {
 
 variable "office_hours_enabled" {
   type        = bool
-  description = "Liga/desliga ECS e RDS no horário comercial. false = sempre ligado (mínimo 1 task)."
+  description = "Turns ECS and RDS on/off on business hours. false = always on (minimum 1 task)."
   default     = true
 }
 
@@ -123,7 +123,7 @@ variable "rds_stop_cron" {
 
 variable "alarm_email" {
   type        = string
-  description = "E-mail que recebe alarmes e avisos de custo (confirmar a assinatura do SNS)."
+  description = "Email that receives alarms and cost notices (confirm the SNS subscription)."
   default     = "gustavo.miler@trustedlake.com"
 }
 

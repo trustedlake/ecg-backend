@@ -31,7 +31,7 @@ infra-oracle/.terraform.lock.hcl
 infra-oracle/tfplan*
 infra-oracle/terraform.tfvars
 
-# Chave privada/pública geradas localmente (nunca versionar) — mas versionar o script que as gera
+# Private/public keys generated locally (never commit them), but do commit the script that generates them
 infra/keys/*
 !infra/keys/generate-key.sh
 
@@ -40,10 +40,10 @@ infra/keys/*
 .vscode/
 .DS_Store
 Thumbs.db
-# Export web do Expo (gerado no build da imagem)
+# Expo web export (built with the image)
 frontend_dist
 
-# infra/aws (produção)
+# infra/aws (production)
 infra/aws/.terraform/
 infra/aws/*.tfstate*
 infra/aws/*.plan

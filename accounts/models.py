@@ -10,7 +10,7 @@ class UserManager(BaseUserManager):
 
     def _create_user(self, username, password, **extra_fields):
         if not username:
-            raise ValueError("username é obrigatório")
+            raise ValueError("username is required")
         user = self.model(username=username, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
@@ -29,7 +29,7 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
-    """Médico do sistema. Username é o identificador de login (USERNAME_FIELD)."""
+    """System doctor. Username is the login identifier (USERNAME_FIELD)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     username = models.CharField(max_length=150, unique=True)

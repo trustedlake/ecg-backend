@@ -20,7 +20,7 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Environment variables (.env, ver README)
+# Environment variables (.env, see README)
 env = environ.Env(
     DEBUG=(bool, False),
     ALLOWED_HOSTS=(list, []),
@@ -38,23 +38,23 @@ SECRET_KEY = env(
 DEBUG = env("DEBUG")
 # Reject the development fallback secret in production.
 if not DEBUG and not env("DJANGO_SECRET_KEY", default="").strip():
-    raise ImproperlyConfigured("Defina DJANGO_SECRET_KEY em produção")
+    raise ImproperlyConfigured("Set DJANGO_SECRET_KEY in production")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
-# Origens HTTPS confiáveis para o admin (ex.: https://<api-id>.execute-api.sa-east-1.amazonaws.com).
+# Trusted HTTPS origins for the admin (e.g. https://<api-id>.execute-api.sa-east-1.amazonaws.com).
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
-# Atrás do API Gateway (HTTPS na borda; a conexão até o container é HTTP pela VPC).
+# Behind API Gateway (HTTPS at the edge; the hop to the container is HTTP inside the VPC).
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
-# Em prod (só HTTPS via execute-api) a task define 31536000; sem includeSubDomains/preload.
+# In prod (HTTPS only via execute-api) the task sets 31536000; no includeSubDomains/preload.
 SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0)
 
-# CORS — origens Expo Web explícitas; produção deve usar domínio HTTPS autorizado.
+# CORS: explicit Expo Web origins; production must use an authorized HTTPS domain.
 CORS_ALLOWED_ORIGINS = env.list(
     "CORS_ALLOWED_ORIGINS",
     default=["http://localhost:8081", "http://127.0.0.1:8081"],
@@ -112,8 +112,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-# Ordem: DATABASE_URL; senão DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD (prod: RDS, senha
-# injetada do SSM pelo ECS); senão SQLite local para desenvolvimento.
+# Order: DATABASE_URL; else DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD (prod: RDS, password
+# injected from SSM by ECS); else local SQLite for development.
 
 def _database_config():
     if env("DATABASE_URL", default=""):
@@ -141,7 +141,7 @@ if (
     and DATABASES["default"]["ENGINE"] != "django.db.backends.sqlite3"
     and DATABASES["default"].get("OPTIONS", {}).get("sslmode") not in ("require", "verify-ca", "verify-full")
 ):
-    raise ImproperlyConfigured("Em produção o PostgreSQL exige sslmode=require|verify-ca|verify-full.")
+    raise ImproperlyConfigured("In production PostgreSQL requires sslmode=require|verify-ca|verify-full.")
 
 
 # Password validation
@@ -163,7 +163,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
-# Testes: hash de senha rápido (o PBKDF2 padrão deixava a suíte ~10x mais lenta).
+# Tests: fast password hashing (the default PBKDF2 made the suite ~10x slower).
 if len(sys.argv) > 1 and sys.argv[1] == "test":
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
@@ -190,12 +190,12 @@ STORAGES = {
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
-# SPA: export web do Expo (gerado no build da imagem, fora do git). WhiteNoise serve os
-# arquivos na raiz; a view catch-all de config/urls.py devolve o index.html nas rotas do app.
+# SPA: Expo web export (built with the image, not in git). WhiteNoise serves the
+# files at the root; the catch-all view in config/urls.py returns index.html for app routes.
 FRONTEND_DIST = BASE_DIR / "frontend_dist"
 WHITENOISE_ROOT = FRONTEND_DIST if FRONTEND_DIST.is_dir() else None
 
-# Logging: tudo em stdout (CloudWatch Logs via awslogs), uma linha por evento.
+# Logging: everything to stdout (CloudWatch Logs via awslogs), one line per event.
 LOG_LEVEL = env("LOG_LEVEL", default="INFO")
 LOGGING = {
     "version": 1,
@@ -220,8 +220,8 @@ LOGGING = {
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# User custom (email como identificador) — crítico: definido antes de qualquer
-# migration; trocar depois é caro.
+# Custom User: critical, defined before any
+# migration; changing it later is expensive.
 AUTH_USER_MODEL = 'accounts.User'
 
 # DRF — token opaco (rest_framework.authtoken) no header Authorization: Token
@@ -232,19 +232,19 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
-    # Throttle do login por IP. O cache é local de cada worker do gunicorn: o limite real é
-    # aproximado (x workers x tasks), suficiente contra força bruta simples.
+    # Login throttle per IP. The cache is local to each gunicorn worker: the real limit is
+    # approximate (x workers x tasks), enough against simple brute force.
     'DEFAULT_THROTTLE_RATES': {
         'login': env("LOGIN_THROTTLE_RATE", default="10/min"),
     },
 }
-# O API Gateway repassa o IP do cliente em X-Forwarded-For; a task só recebe tráfego dele.
+# API Gateway forwards the client IP in X-Forwarded-For; the task only gets traffic from it.
 REST_FRAMEWORK['NUM_PROXIES'] = 1
 
-# AWS — orquestração das lambdas + presigned URLs (Fase 2)
-# Local: boto3 usa a cadeia padrão de credenciais; para dev, exportar
-# AWS_PROFILE=trustedlake (perfil com acesso à conta 785236377332). Em
-# produção isso vira IAM role da instância (fase Terraform).
+# AWS: lambda orchestration + presigned URLs (Phase 2)
+# Local: boto3 uses the default credential chain; for dev, export
+# AWS_PROFILE=trustedlake (profile with access to account 785236377332). In
+# production this becomes the instance IAM role (Terraform phase).
 AWS_REGION = env("AWS_REGION", default="sa-east-1")
 AWS_PROFILE_NAME = env("AWS_PROFILE", default=None)
 AWS_IMAGES_BUCKET = env(
@@ -255,30 +255,30 @@ AWS_RESULTS_BUCKET = env(
     "AWS_RESULTS_BUCKET",
     default="ecg-lambdas-results-785236377332-sa-east-1",
 )
-# Lambdas do contrato (tl-gmiler/ecg-lambdas-v1, CONTRATO_LAMBDAS.md): leitura 2.0 real e
-# interpretação mock. Os cenários de teste são o campo `mock` do payload, nas mesmas funções.
+# Contract lambdas (tl-gmiler/ecg-lambdas-v1, lambda contract): real reading 2.0 and
+# mock interpretation. Test scenarios are the payload `mock` field, on the same functions.
 AWS_LAMBDA_ECG_READING = env("AWS_LAMBDA_ECG_READING", default="ecg-reading")
 AWS_LAMBDA_ECG_INTERPRETATION = env(
     "AWS_LAMBDA_ECG_INTERPRETATION", default="ecg-interpretation"
 )
-# Libera o campo test_scenario (repassado como `mock` às lambdas) para usuários staff.
+# Enables the test_scenario field (forwarded as `mock` to the lambdas) for staff users.
 ECG_TEST_SCENARIOS_ENABLED = env.bool("ECG_TEST_SCENARIOS_ENABLED", default=False)
 PRESIGN_URL_EXPIRES = env.int("PRESIGN_URL_EXPIRES", default=3600)
 
 # Must exceed the reading Lambda timeout (ecg-reading: 900 s).
 AWS_LAMBDA_READ_TIMEOUT = env.int("AWS_LAMBDA_READ_TIMEOUT", default=930)
 
-# Execução das fases: "inline" (na hora, dev/testes) ou "sqs" (fila consumida pelo worker).
+# Phase execution: "inline" (right away, dev/tests) or "sqs" (queue consumed by the worker).
 ECG_TASK_MODE = env("ECG_TASK_MODE", default="inline")
 if ECG_TASK_MODE not in ("inline", "sqs"):
-    raise ImproperlyConfigured("ECG_TASK_MODE deve ser 'inline' ou 'sqs'.")
+    raise ImproperlyConfigured("ECG_TASK_MODE must be 'inline' or 'sqs'.")
 ECG_TASK_QUEUE_URL = env("ECG_TASK_QUEUE_URL", default="")
-# Mensagens processadas em paralelo pelo worker; cada leitura real espera a lambda por até 900 s.
+# Messages processed in parallel by the worker; each real reading waits for the lambda up to 900 s.
 ECG_WORKER_CONCURRENCY = env.int("ECG_WORKER_CONCURRENCY", default=4)
 if ECG_TASK_MODE == "sqs" and not ECG_TASK_QUEUE_URL:
     raise ImproperlyConfigured("ECG_TASK_MODE=sqs exige ECG_TASK_QUEUE_URL.")
 
-# Versão exposta em /api/health/ (git sha injetado no build da imagem).
+# Version exposed at /api/health/ (git sha injected at image build).
 APP_VERSION = env("APP_VERSION", default="dev")
 
 # An attempt stuck in "*_processando" longer than this (seconds) is considered

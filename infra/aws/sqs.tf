@@ -1,4 +1,4 @@
-# Fila das fases (leitura/interpretação) consumida pelo container worker (exams/management/commands/ecg_worker.py).
+# Phase queue (reading/interpretation) consumed by the worker container (exams/management/commands/ecg_worker.py).
 
 resource "aws_sqs_queue" "tasks_dlq" {
   name                      = "ecg-tasks-dlq"
@@ -6,8 +6,8 @@ resource "aws_sqs_queue" "tasks_dlq" {
   message_retention_seconds = 1209600
 }
 
-# Visibility maior que o read_timeout do boto (AWS_LAMBDA_READ_TIMEOUT=930 s; a ecg-reading roda
-# até 900 s): a mensagem só reaparece se o worker morrer no meio da fase.
+# Visibility longer than the boto read_timeout (AWS_LAMBDA_READ_TIMEOUT=930 s; ecg-reading runs
+# up to 900 s): the message only reappears if the worker dies mid-phase.
 resource "aws_sqs_queue" "tasks" {
   name                       = "ecg-tasks"
   sqs_managed_sse_enabled    = true

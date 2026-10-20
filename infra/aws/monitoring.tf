@@ -1,5 +1,5 @@
 # 10 alarmes (cota gratuita do CloudWatch) → SNS ecg-alerts (e-mail) e budget mensal.
-# notBreaching: fora do horário não há métrica (ECS em 0, RDS parado) e isso não é alarme.
+# notBreaching: outside business hours there is no metric (ECS at 0, RDS stopped) and that is not an alarm.
 
 resource "aws_sns_topic" "alerts" {
   name = "ecg-alerts"
@@ -14,7 +14,7 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 locals {
   alarms = {
     "ecg-api-5xx" = {
-      description = "API Gateway: respostas 5xx (fora do horário o 503 não chega aqui: sem tráfego do app)"
+      description = "API Gateway: 5xx responses (outside business hours the 503 does not reach here: no app traffic)"
       namespace   = "AWS/ApiGateway"
       metric      = "5xx"
       dimensions  = { ApiId = aws_apigatewayv2_api.this.id, Stage = aws_apigatewayv2_stage.default.name }
@@ -25,7 +25,7 @@ locals {
       threshold   = 5
     }
     "ecg-ecs-cpu" = {
-      description = "ECS: CPU média do serviço acima de 80% por 10 min"
+      description = "ECS: average service CPU above 80% for 10 min"
       namespace   = "AWS/ECS"
       metric      = "CPUUtilization"
       dimensions  = { ClusterName = aws_ecs_cluster.this.name, ServiceName = aws_ecs_service.backend.name }
@@ -36,7 +36,7 @@ locals {
       threshold   = 80
     }
     "ecg-ecs-memory" = {
-      description = "ECS: memória média do serviço acima de 85% por 10 min"
+      description = "ECS: average service memory above 85% for 10 min"
       namespace   = "AWS/ECS"
       metric      = "MemoryUtilization"
       dimensions  = { ClusterName = aws_ecs_cluster.this.name, ServiceName = aws_ecs_service.backend.name }
@@ -69,7 +69,7 @@ locals {
       threshold   = 2 * 1024 * 1024 * 1024
     }
     "ecg-rds-cpu-credits" = {
-      description = "RDS: saldo de créditos de CPU abaixo de 20"
+      description = "RDS: CPU credit balance below 20"
       namespace   = "AWS/RDS"
       metric      = "CPUCreditBalance"
       dimensions  = { DBInstanceIdentifier = aws_db_instance.this.identifier }
@@ -80,7 +80,7 @@ locals {
       threshold   = 20
     }
     "ecg-dlq-messages" = {
-      description = "SQS: tarefa na DLQ (falhou 3 vezes no worker)"
+      description = "SQS: task in the DLQ (failed 3 times in the worker)"
       namespace   = "AWS/SQS"
       metric      = "ApproximateNumberOfMessagesVisible"
       dimensions  = { QueueName = aws_sqs_queue.tasks_dlq.name }
@@ -91,7 +91,7 @@ locals {
       threshold   = 1
     }
     "ecg-queue-age" = {
-      description = "SQS: mensagem mais antiga da fila com mais de 5 min (worker parado ou lento)"
+      description = "SQS: oldest queue message older than 5 min (worker stopped or slow)"
       namespace   = "AWS/SQS"
       metric      = "ApproximateAgeOfOldestMessage"
       dimensions  = { QueueName = aws_sqs_queue.tasks.name }
@@ -99,11 +99,11 @@ locals {
       period      = 300
       periods     = 1
       comparison  = "GreaterThanThreshold"
-      # Uma leitura real leva 50–190 s (até 900 s); acima de 10 min a fila está travada.
+      # A real reading takes 50-190 s (up to 900 s); above 10 min the queue is stuck.
       threshold = 600
     }
     "ecg-lambda-reading-errors" = {
-      description = "Lambda de leitura: erros de execução"
+      description = "Reading lambda: execution errors"
       namespace   = "AWS/Lambda"
       metric      = "Errors"
       dimensions  = { FunctionName = var.reading_lambda_name }
@@ -114,7 +114,7 @@ locals {
       threshold   = 1
     }
     "ecg-lambda-interpretation-errors" = {
-      description = "Lambda de interpretação: erros de execução"
+      description = "Interpretation lambda: execution errors"
       namespace   = "AWS/Lambda"
       metric      = "Errors"
       dimensions  = { FunctionName = var.interpretation_lambda_name }
@@ -146,7 +146,7 @@ resource "aws_cloudwatch_metric_alarm" "this" {
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
 
-# O filtro do budget por tag só funciona com a tag de alocação de custo ativa (estava Inactive).
+# The budget tag filter only works with the cost allocation tag active (it was Inactive).
 resource "aws_ce_cost_allocation_tag" "project" {
   tag_key = "project"
   status  = "Active"

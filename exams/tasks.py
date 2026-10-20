@@ -1,7 +1,7 @@
-"""Execução assíncrona das fases (docs/fluxo-usuario-v1.md D6).
+"""Asynchronous phase execution (docs/user-flow-v1.md D6).
 
-`ECG_TASK_MODE=inline` (dev/testes) roda a fase na hora, dentro do request. `sqs` publica
-`{"ecg_task": "read|interpret", "attempt_id": "<uuid>"}` na fila `ECG_TASK_QUEUE_URL`; o worker
+`ECG_TASK_MODE=inline` (dev/tests) runs the phase right away, inside the request. `sqs` publishes
+`{"ecg_task": "read|interpret", "attempt_id": "<uuid>"}` to the `ECG_TASK_QUEUE_URL` queue; the worker
 (`manage.py ecg_worker`, etapa B4) consome e chama `run_task`.
 """
 
@@ -27,10 +27,10 @@ def _sqs_client():
 
 
 def run_task(task, attempt_id):
-    """Executa a fase `task` da tentativa. Idempotente e nunca levanta exceção.
+    """Runs phase `task` of the attempt. Idempotent and never raises.
 
-    Só roda se a tentativa estiver no `*_processando` da fase: um evento duplicado ou atrasado
-    (tentativa já concluída, recusada, em erro) é ignorado. Devolve True se a fase rodou.
+    Runs only if the attempt is in the phase's processing state: a duplicate or late event
+    (attempt already completed, refused, in error) is ignored. Returns True if the phase ran.
     """
     if task not in TASKS:
         logger.error("Tarefa desconhecida %r (attempt_id=%s)", task, attempt_id)
@@ -38,29 +38,29 @@ def run_task(task, attempt_id):
     try:
         attempt = ExamAttempt.objects.select_related("exam__patient").get(pk=attempt_id)
     except (ExamAttempt.DoesNotExist, ValidationError, ValueError, TypeError):
-        logger.warning("Tarefa %s: tentativa %s não existe", task, attempt_id)
+        logger.warning("Task %s: attempt %s does not exist", task, attempt_id)
         return False
 
     processing = services.PHASES[task][0]
     if attempt.status != processing:
-        logger.info("Tarefa %s ignorada: tentativa %s está em %s", task, attempt_id, attempt.status)
+        logger.info("Task %s skipped: attempt %s is in %s", task, attempt_id, attempt.status)
         return False
 
     try:
         TASKS[task](attempt)
     except Exception:
-        logger.exception("Tarefa %s falhou na tentativa %s", task, attempt_id)
+        logger.exception("Task %s failed on attempt %s", task, attempt_id)
         try:
             services.fail_phase(attempt, task, "INTERNAL_ERROR")
         except Exception:
-            logger.exception("Não foi possível marcar erro na tentativa %s", attempt_id)
+            logger.exception("Could not mark an error on attempt %s", attempt_id)
     return True
 
 
 def dispatch(task, attempt):
-    """Dispara a fase de uma tentativa que acabou de entrar no `*_processando` dela.
+    """Starts the phase of an attempt that just entered its processing state.
 
-    Se a publicação na fila falhar, a tentativa vai para `erro_*` com `INTERNAL_ERROR` retryable.
+    If publishing to the queue fails, the attempt goes to an error state with a retryable `INTERNAL_ERROR`.
     """
     attempt_id = str(attempt.pk)
     if settings.ECG_TASK_MODE != "sqs":
@@ -72,5 +72,5 @@ def dispatch(task, attempt):
             MessageBody=json.dumps({"ecg_task": task, "attempt_id": attempt_id}),
         )
     except Exception:
-        logger.exception("Falha ao publicar a tarefa %s da tentativa %s", task, attempt_id)
+        logger.exception("Failed to publish task %s of attempt %s", task, attempt_id)
         services.fail_phase(attempt, task, "INTERNAL_ERROR")

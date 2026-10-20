@@ -1,7 +1,7 @@
-"""Testes de API do fluxo V1 (plano §0.1, fluxo §3–4), com ECG_TASK_MODE=inline.
+"""API tests for the V1 flow (plan §0.1, flow §3-4), with ECG_TASK_MODE=inline.
 
-As lambdas são mockadas em `services.invoke_contract` (envelopes do contrato); o sinal no S3 em
-`services._read_json_from_s3`; presigned URLs em `services.presign_get_url`/`presign_put_url`.
+The lambdas are mocked at `services.invoke_contract` (contract envelopes); the S3 signal at
+`services._read_json_from_s3`; presigned URLs at `services.presign_get_url`/`presign_put_url`.
 """
 
 import json
@@ -20,7 +20,7 @@ from .models import Exam, ExamAttempt, ExamStatus, Patient
 
 User = get_user_model()
 RESULTS = settings.AWS_RESULTS_BUCKET
-# leads.json do método escolhido: sem sampling_rate_hz (vem do método) e com o resumo por derivação.
+# leads.json of the chosen method: no sampling_rate_hz (it comes from the method), with the per-lead summary.
 SIGNAL = {"leads": [{"name": "II", "kind": "rhythm", "quality": "good", "coverage": 1.0, "samples": [0.0, 0.1]}]}
 
 
@@ -33,7 +33,7 @@ def env(op, rid, status, result=None, error=None, warnings=None):
 
 
 def read_ok(rid, status="OK", warnings=None):
-    """Leitura 2.0 com um único método OK; os avisos vêm no método (contrato §3)."""
+    """Reading 2.0 with a single OK method; warnings come on the method (contract §3)."""
     prefix = f"reading/{rid}/run1/baseline_peaks"
     method = {
         "method": "baseline_peaks", "version": "v1", "status": "OK", "reason": None,
@@ -52,7 +52,7 @@ def interp_ok(rid, status="OK", warnings=None):
         "summary": {"classification": "normal", "headline": "ECG normal", "rhythm": "Ritmo sinusal",
                     "heart_rate_bpm": 72, "key_findings": ["Ritmo sinusal"], "text": "Ritmo sinusal, FC 72 bpm."},
         "details": {"measurements": {}, "findings": [], "criteria": [], "per_lead": []},
-        "disclaimer": "Não substitui o laudo de um médico.",
+        "disclaimer": "Does not replace a physician's report.",
     }
     return env("interpret", rid, status, result=result, warnings=warnings)
 
@@ -67,12 +67,12 @@ def error(op, rid, code, retryable, category="processing", status="ERROR", detai
 @override_settings(ECG_TASK_MODE="inline", ECG_TEST_SCENARIOS_ENABLED=False)
 class FlowTestCase(APITestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username="medica", email="m@t.local", password="senha-123",
-                                             name="Médica", crm="CRM-1")
+        self.user = User.objects.create_user(username="doctor", email="m@t.local", password="pass-123",
+                                             name="Doctor", crm="CRM-1")
         self.client.force_authenticate(self.user)
         self.patient = Patient.objects.create(doctor=self.user, name="Ana", age=30, sex="F")
         self.exam = Exam.objects.create(patient=self.patient, doctor=self.user)
-        self.responses = {}  # operação -> envelope ou função(rid) -> envelope
+        self.responses = {}  # operation -> envelope or function(rid) -> envelope
         self.calls = []
 
         def fake_invoke(function_name, payload, operation=None):
@@ -138,11 +138,11 @@ class HappyPathTest(FlowTestCase):
         data = self.get_attempt(aid)
         self.assertEqual(data["status"], ExamStatus.COMPLETED)
         self.assertEqual(data["interpretation"]["summary"]["heart_rate_bpm"], 72)
-        self.assertEqual(data["interpretation"]["disclaimer"], "Não substitui o laudo de um médico.")
+        self.assertEqual(data["interpretation"]["disclaimer"], "Does not replace a physician's report.")
         self.assertEqual((data["can_retry"], data["needs_new_photo"]), (False, False))
         self.assertEqual(self.exam_status(), ExamStatus.COMPLETED)
         self.assertEqual(self.calls[1][1]["patient"], {"sex": "F"})
-        # O leads.json vai como signal, com a taxa do método escolhido (contrato 2.0 §4).
+        # leads.json goes as signal, with the chosen method's sample rate (contract 2.0 §4).
         self.assertEqual(self.calls[1][1]["signal"], {**SIGNAL, "sampling_rate_hz": 150.0, "units": "mV"})
 
         detail = self.client.get(reverse("exam-detail", args=[self.exam.id])).data
@@ -151,7 +151,7 @@ class HappyPathTest(FlowTestCase):
     def test_with_warnings(self):
         aid = self.new_attempt()
         rw = [{"code": "LEAD_PARTIAL_TRACE", "message": "V2 parcial.", "lead": "V2"}]
-        iw = [{"code": "MEASUREMENT_UNRELIABLE", "message": "QT pouco confiável."}]
+        iw = [{"code": "MEASUREMENT_UNRELIABLE", "message": "QT unreliable."}]
         self.responses = {"read": lambda rid: read_ok(rid, "OK_WITH_WARNINGS", rw),
                           "interpret": lambda rid: interp_ok(rid, "OK_WITH_WARNINGS", iw)}
         data = self.post("attempt-read", aid).data
@@ -240,7 +240,7 @@ class ErrorAndRetryTest(FlowTestCase):
         self.assertEqual(data["status"], ExamStatus.INTERPRETATION_ERROR)
         self.assertTrue(data["can_retry"])
         self.assertEqual(data["interpretation"]["error"]["code"], "INTERNAL_ERROR")
-        self.assertEqual(data["reading"]["status"], "OK")  # a leitura é preservada
+        self.assertEqual(data["reading"]["status"], "OK")  # the reading is kept
 
         self.responses["interpret"] = interp_ok
         resp = self.post("attempt-retry", aid)
@@ -267,7 +267,7 @@ class ErrorAndRetryTest(FlowTestCase):
         self.assertEqual(data["status"], ExamStatus.READING_ERROR)
         self.assertEqual(data["reading"]["error"], {
             "code": "TASK_TIMEOUT", "category": "internal", "retryable": True,
-            "message": "O processamento demorou mais que o esperado. Tente de novo."})
+            "message": "Processing took longer than expected. Try again."})
         self.assertTrue(data["can_retry"])
         self.assertEqual(self.exam_status(), ExamStatus.READING_ERROR)
 
@@ -316,8 +316,8 @@ class TestScenarioTest(FlowTestCase):
 
 class ConfigHealthLoginTest(APITestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username="medica", email="m@t.local", password="senha-123",
-                                             name="Médica", crm="CRM-1")
+        self.user = User.objects.create_user(username="doctor", email="m@t.local", password="pass-123",
+                                             name="Doctor", crm="CRM-1")
 
     def _config(self):
         self.client.force_authenticate(self.user)
@@ -358,10 +358,10 @@ class ConfigHealthLoginTest(APITestCase):
     def test_login_returns_is_staff(self):
         self.user.is_staff = True
         self.user.save()
-        resp = self.client.post(reverse("login"), {"username": "medica", "password": "senha-123"}, format="json")
+        resp = self.client.post(reverse("login"), {"username": "doctor", "password": "pass-123"}, format="json")
         self.assertEqual(resp.status_code, 200)
         self.assertIs(resp.data["user"]["is_staff"], True)
-        self.assertEqual(resp.data["user"]["username"], "medica")
+        self.assertEqual(resp.data["user"]["username"], "doctor")
 
 
 @override_settings(ECG_TASK_MODE="sqs", ECG_TASK_QUEUE_URL="https://sqs.sa-east-1.amazonaws.com/1/ecg-tasks")
@@ -384,7 +384,7 @@ class SqsDispatchTest(FlowTestCase):
         )
         self.assertEqual(self.calls, [])
 
-        # O worker consome: roda uma vez; evento duplicado é ignorado.
+        # The worker consumes: runs once; a duplicate event is ignored.
         self.responses = {"read": read_ok}
         self.assertTrue(tasks.run_task("read", aid))
         self.assertFalse(tasks.run_task("read", aid))
@@ -404,4 +404,4 @@ class SqsDispatchTest(FlowTestCase):
     def test_run_task_ignores_unknown_inputs(self):
         self.assertFalse(tasks.run_task("bogus", "x"))
         self.assertFalse(tasks.run_task("read", "00000000-0000-0000-0000-000000000000"))
-        self.assertFalse(tasks.run_task("read", "nao-e-uuid"))
+        self.assertFalse(tasks.run_task("read", "not-a-uuid"))

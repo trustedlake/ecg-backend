@@ -1,7 +1,7 @@
-"""Testes do cliente das lambdas (exams/services.py): leitura 2.0 e interpretação.
+"""Tests for the lambda client (exams/services.py): reading 2.0 and interpretation.
 
-O cliente boto3 da lambda e a leitura do leads.json no S3 são mockados; as fixtures seguem os
-exemplos do CONTRATO_LAMBDAS.md do ecg-lambdas-v1 (§1, §3, §4). Nenhum teste fala com a AWS.
+The boto3 lambda client and the S3 leads.json read are mocked; the fixtures follow the
+examples of the ecg-lambdas-v1 lambda contract (§1, §3, §4). No test talks to AWS.
 """
 
 import io
@@ -33,7 +33,7 @@ def _envelope(operation, request_id, status, result=None, error=None, warnings=N
 
 
 def _method(request_id, name, status="OK", score=None, warnings=None, prefix=None, bucket=RESULTS):
-    """Um dos seis métodos do contrato 2.0 §3; só `OK` tem leads.json."""
+    """One of the six contract 2.0 §3 methods; only `OK` has leads.json."""
     base = f"{prefix or f'reading/{request_id}/run1'}/{name}"
     ok = status == "OK"
     return {
@@ -49,7 +49,7 @@ def _method(request_id, name, status="OK", score=None, warnings=None, prefix=Non
 
 
 def _read_result(request_id, best_warnings=None, prefix=None, bucket=RESULTS):
-    """Seis métodos; o escolhido é `faint_ink` (maior score entre os OK com score)."""
+    """Six methods; the chosen one is `faint_ink` (highest score among the OK ones with a score)."""
     kw = {"prefix": prefix, "bucket": bucket}
     methods = [
         _method(request_id, "baseline_peaks", "OK", 70.0, **kw),
@@ -74,12 +74,12 @@ LEADS_DOC = {"leads": [
 
 INTERP_RESULT = {
     "patient": {"sex": "F"},
-    "summary": {"classification": "normal", "headline": "ECG dentro dos limites da normalidade",
+    "summary": {"classification": "normal", "headline": "ECG within normal limits",
                 "rhythm": "Ritmo sinusal", "heart_rate_bpm": 72,
                 "key_findings": ["Ritmo sinusal"], "text": "Ritmo sinusal, FC 72 bpm."},
     "details": {"measurements": {"heart_rate_bpm": {"value": 72, "unit": "bpm", "confidence": "high"}},
                 "findings": [], "criteria": [], "per_lead": []},
-    "disclaimer": "Resultado gerado automaticamente. Não substitui o laudo de um médico.",
+    "disclaimer": "Automatically generated result. Does not replace a physician's report.",
 }
 
 SIGNAL = {"leads": [{"name": "II", "kind": "rhythm", "samples": [0.0, 0.1]}]}
@@ -98,7 +98,7 @@ def _lambda_response(body, function_error=None):
 class ServicesTestCase(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
-            username="medico", email="m@test.local", password="x", name="Médica", crm="CRM-1"
+            username="doctor", email="m@test.local", password="x", name="Doctor", crm="CRM-1"
         )
         self.patient = Patient.objects.create(doctor=self.user, name="Ana", age=30, sex="F")
         self.exam = Exam.objects.create(patient=self.patient, doctor=self.user)
@@ -174,7 +174,7 @@ class InvokeContractTest(ServicesTestCase):
             {"status": "MAYBE"},
             _envelope("read", self.rid, "OK", result=None),
             _envelope("read", self.rid, "ERROR", error={"code": "X"}),
-            _envelope("read", self.rid, "OK", result={}, warnings=[{"message": "sem code"}]),
+            _envelope("read", self.rid, "OK", result={}, warnings=[{"message": "no code"}]),
             _envelope("read", "outro-id", "OK", result={}),
             _envelope("interpret", self.rid, "REFUSED",
                       error={"code": "X", "category": "refused", "retryable": False, "message": "m"}),
@@ -245,12 +245,12 @@ class RunReadingTest(ServicesTestCase):
         self.assertEqual(self._sent_payload()["mock"], {"scenario": "refused"})
 
     def test_ok_with_warnings_takes_warnings_from_chosen_method(self):
-        warnings = [{"code": "AMBIGUOUS_TRACE", "message": "Traçado ambíguo.", "lead": "V2"},
+        warnings = [{"code": "AMBIGUOUS_TRACE", "message": "Ambiguous trace.", "lead": "V2"},
                     {"code": "GRID_CALIBRATION_UNCERTAIN", "message": "Grade incerta."},
                     {"code": "AMBIGUOUS_TRACE", "message": "repetido", "lead": "V2"},
-                    {"message": "sem code"}]
+                    {"message": "no code"}]
         result = _read_result(self.rid, best_warnings=warnings)
-        result["methods"][0]["warnings"] = [{"code": "ORIENTATION_UNCERTAIN", "message": "outro método"}]
+        result["methods"][0]["warnings"] = [{"code": "ORIENTATION_UNCERTAIN", "message": "another method"}]
         self._lambda_returns(_envelope("read", self.rid, "OK_WITH_WARNINGS", result=result))
         services.run_reading(self.attempt)
         self._reload()
@@ -268,7 +268,7 @@ class RunReadingTest(ServicesTestCase):
         methods = [_method(self.rid, name, "ABSTAINED") for name in ("baseline_peaks", "chromatic_ink")]
         methods[0]["files"]["image"] = None
         error = {"code": "READ_REFUSED_UNREADABLE_TRACE", "category": "refused", "retryable": False,
-                 "message": "Traçado ilegível.", "details": {"methods": methods}}
+                 "message": "Unreadable trace.", "details": {"methods": methods}}
         self._lambda_returns(_envelope("read", self.rid, "REFUSED", error=error))
         services.run_reading(self.attempt)
         self._reload()
@@ -276,7 +276,7 @@ class RunReadingTest(ServicesTestCase):
         self.assertEqual(self.exam.status, ExamStatus.READING_REFUSED)
         reading = self.attempt.reading
         self.assertEqual(reading["error"], {"code": "READ_REFUSED_UNREADABLE_TRACE", "category": "refused",
-                                            "retryable": False, "message": "Traçado ilegível."})
+                                            "retryable": False, "message": "Unreadable trace."})
         self.assertEqual(reading["artifacts"]["refusal_preview"]["key"],
                          f"reading/{self.rid}/run1/chromatic_ink/rejection_preview.png")
         self.assertIsNone(reading["refusal_region_px"])
@@ -285,7 +285,7 @@ class RunReadingTest(ServicesTestCase):
 
     def test_refused_keeps_legacy_preview_and_region(self):
         error = {"code": "READ_REFUSED_OCCLUDED", "category": "refused", "retryable": False,
-                 "message": "Há sobreposição sobre o traçado.",
+                 "message": "Something overlaps the trace.",
                  "details": {"region_px": [560, 300, 960, 700],
                              "preview": {"bucket": RESULTS, "key": f"reading/{self.rid}/r/refusal_preview.png"}}}
         self._lambda_returns(_envelope("read", self.rid, "REFUSED", error=error))
@@ -296,10 +296,10 @@ class RunReadingTest(ServicesTestCase):
                          f"reading/{self.rid}/r/refusal_preview.png")
 
     def test_refused_preview_outside_prefix_is_dropped(self):
-        other = _method("outra-tentativa", "baseline_peaks", "BLOCKED")
+        other = _method("other-attempt", "baseline_peaks", "BLOCKED")
         error = {"code": "READ_REFUSED_LOW_CONTRAST", "category": "refused", "retryable": False, "message": "m",
                  "details": {"methods": [other],
-                             "preview": {"bucket": RESULTS, "key": "reading/outra-tentativa/r/p.png"}}}
+                             "preview": {"bucket": RESULTS, "key": "reading/other-attempt/r/p.png"}}}
         self._lambda_returns(_envelope("read", self.rid, "REFUSED", error=error))
         services.run_reading(self.attempt)
         self._reload()
@@ -309,7 +309,7 @@ class RunReadingTest(ServicesTestCase):
 
     def test_error_not_retryable(self):
         error = {"code": "LAYOUT_UNSUPPORTED", "category": "validation", "retryable": False,
-                 "message": "Layout não suportado."}
+                 "message": "Layout not supported."}
         self._lambda_returns(_envelope("read", self.rid, "ERROR", error=error))
         services.run_reading(self.attempt)
         self._reload()
@@ -319,7 +319,7 @@ class RunReadingTest(ServicesTestCase):
 
     def test_error_retryable_keeps_methods_summary(self):
         error = {"code": "READ_SELECTOR_UNAVAILABLE", "category": "processing", "retryable": True,
-                 "message": "Seletor indisponível.",
+                 "message": "Selector unavailable.",
                  "details": {"methods": [_method(self.rid, "baseline_peaks", "ERROR")]}}
         self._lambda_returns(_envelope("read", self.rid, "ERROR", error=error))
         services.run_reading(self.attempt)
@@ -344,9 +344,9 @@ class RunReadingTest(ServicesTestCase):
                 method["status"] = "ABSTAINED"
         cases = {
             "outro bucket": _read_result(self.rid, bucket="outro-bucket"),
-            "outra tentativa": _read_result(self.rid, prefix="reading/outra-tentativa/run1"),
+            "other attempt": _read_result(self.rid, prefix="reading/other-attempt/run1"),
             "path traversal": _read_result(self.rid, prefix=f"reading/{self.rid}/../x"),
-            "sem methods": {"layout": "3x4+1", "methods": None},
+            "no methods": {"layout": "3x4+1", "methods": None},
             "nenhum OK": no_ok,
         }
         for name, result in cases.items():
@@ -421,7 +421,7 @@ class RunInterpretationTest(ServicesTestCase):
         self.s3_read.assert_called_once_with(RESULTS, f"reading/{self.rid}/run1/faint_ink/leads.json")
         payload = self._sent_payload()
         self.assertEqual(payload["contract_version"], "2.0")
-        # leads.json + taxa do método escolhido (contrato 2.0 §4).
+        # leads.json + the chosen method's sample rate (contract 2.0 §4).
         self.assertEqual(payload["signal"], {**SIGNAL, "sampling_rate_hz": 150.0, "units": "mV"})
         self.assertNotIn("sampling_rate_hz", SIGNAL)
         self.assertEqual(payload["patient"], {"sex": "F"})

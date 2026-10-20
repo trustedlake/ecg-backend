@@ -1,4 +1,4 @@
-# Só o código da aplicação entra na imagem (plano B4).
+# Only the application code goes into the image (plan B4).
 .git
 .github
 .env
@@ -18,7 +18,7 @@ ci
 **/tests.py
 **/test_*.py
 smoke_e2e.py
-INTEGRACAO_ECG.md
+ECG_INTEGRATION.md
 README.md
 CONTRATO_LAMBDAS.md
 Dockerfile

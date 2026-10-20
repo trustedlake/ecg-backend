@@ -1,4 +1,4 @@
-"""Testes de produção (plano B4): SPA catch-all, 404 JSON da API, banco por DB_*."""
+"""Production tests (plan B4): SPA catch-all, API JSON 404, database from DB_*."""
 
 import os
 import tempfile
@@ -19,7 +19,7 @@ class SpaTests(SimpleTestCase):
     def test_routes_serve_index_html(self):
         (self.dist / "index.html").write_text("<html>app ecg</html>")
         with override_settings(FRONTEND_DIST=self.dist):
-            for url in ["/", "/exames/123", "/login", "/apiary", "/administracao"]:
+            for url in ["/", "/exams/123", "/login", "/apiary", "/administration"]:
                 with self.subTest(url=url):
                     response = self.client.get(url)
                     self.assertEqual(response.status_code, 200)
@@ -28,7 +28,7 @@ class SpaTests(SimpleTestCase):
 
     def test_missing_dist_is_clear_404(self):
         with override_settings(FRONTEND_DIST=self.dist):
-            response = self.client.get("/exames")
+            response = self.client.get("/exams")
         self.assertEqual(response.status_code, 404)
         self.assertIn("frontend_dist/index.html", response.content.decode())
 
@@ -43,7 +43,7 @@ class SpaTests(SimpleTestCase):
         (self.dist / "index.html").write_text("<html></html>")
         with override_settings(FRONTEND_DIST=self.dist):
             self.assertEqual(self.client.get("/static/nada.js").status_code, 404)
-            # O admin manda rota desconhecida para o login dele, nunca para o app.
+            # The admin sends unknown routes to its own login, never to the app.
             response = self.client.get("/admin/nada/")
             self.assertEqual(response.status_code, 302)
             self.assertTrue(response["Location"].startswith("/admin/login/"))
@@ -56,7 +56,7 @@ class SpaTests(SimpleTestCase):
     def test_post_not_allowed(self):
         (self.dist / "index.html").write_text("<html></html>")
         with override_settings(FRONTEND_DIST=self.dist):
-            self.assertEqual(self.client.post("/exames").status_code, 405)
+            self.assertEqual(self.client.post("/exams").status_code, 405)
 
 
 class DatabaseConfigTests(SimpleTestCase):

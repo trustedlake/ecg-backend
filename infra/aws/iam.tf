@@ -1,4 +1,4 @@
-# Roles das tasks do ECS (usadas na I2). Mínimo privilégio.
+# ECS task roles (used in I2). Least privilege.
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
   statement {
@@ -56,7 +56,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
   policy = data.aws_iam_policy_document.ecs_execution_secrets.json
 }
 
-# --- Task role: o que o Django (web e worker) chama na AWS ---
+# --- Task role: what Django (web and worker) calls on AWS ---
 
 resource "aws_iam_role" "ecs_task" {
   name               = "ecg-ecs-task"

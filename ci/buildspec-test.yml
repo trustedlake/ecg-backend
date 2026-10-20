@@ -1,4 +1,4 @@
-# Etapa Test do pipeline: migrations em dia e testes do Django (as lambdas são testadas no ecg-lambdas-v1).
+# Pipeline Test stage: migrations up to date and Django tests (the lambdas are tested in ecg-lambdas-v1).
 version: 0.2
 
 env:

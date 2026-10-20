@@ -18,9 +18,9 @@ BASE=os.environ.get('SMOKE_BASE_URL','http://127.0.0.1:8001').rstrip('/')
 def main():
     image=os.environ.get('SMOKE_IMAGE_PATH')
     if not image or not pathlib.Path(image).is_file():
-        raise SystemExit('Informe SMOKE_IMAGE_PATH com foto ECG controlada')
+        raise SystemExit('Set SMOKE_IMAGE_PATH to a controlled ECG photo')
     if os.environ.get('SMOKE_ALLOW_MUTATIONS')!='YES':
-        raise SystemExit('SMOKE_ALLOW_MUTATIONS=YES é obrigatório; rode só em ambiente descartável')
+        raise SystemExit('SMOKE_ALLOW_MUTATIONS=YES is required; run only in a disposable environment')
     username='smoke-'+uuid.uuid4().hex[:10]
     User=get_user_model()
     user=User.objects.create_user(username=username,email=username+'@example.test',password='Smoke!123',name='Smoke',crm='TEMP')

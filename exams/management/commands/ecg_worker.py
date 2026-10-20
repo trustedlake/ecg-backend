@@ -1,12 +1,12 @@
-"""Worker da fila de fases (plano B4): `python manage.py ecg_worker`.
+"""Phase queue worker (plan B4): `python manage.py ecg_worker`.
 
-Long polling em `ECG_TASK_QUEUE_URL`. Cada mensagem `{"ecg_task", "attempt_id"}` roda via
-`tasks.run_task` (que nunca levanta exceção) e só depois é apagada: se o container morrer no meio,
-a mensagem volta para a fila após o visibility timeout. Corpo inválido é logado e apagado.
-SIGTERM/SIGINT terminam a mensagem em andamento e saem com código 0 (stopTimeout do ECS: 120 s).
-`ECG_WORKER_CONCURRENCY` threads fazem o long polling em paralelo: a leitura real espera a lambda
-por 50–190 s e não pode segurar a fila inteira. Uma leitura cortada pelo stopTimeout volta para a
-fila depois do visibility timeout e é refeita.
+Long polling on `ECG_TASK_QUEUE_URL`. Each `{"ecg_task", "attempt_id"}` message runs through
+`tasks.run_task` (which never raises) and is deleted only afterwards: if the container dies midway,
+the message returns to the queue after the visibility timeout. An invalid body is logged and deleted.
+SIGTERM/SIGINT finish the message in progress and exit with code 0 (ECS stopTimeout: 120 s).
+`ECG_WORKER_CONCURRENCY` threads long-poll in parallel: the real reading waits for the lambda
+for 50-190 s and must not hold up the whole queue. A reading cut off by stopTimeout returns to the
+queue after the visibility timeout and is redone.
 """
 
 import json
@@ -28,7 +28,7 @@ ERROR_BACKOFF_SECONDS = 5
 
 
 def parse_body(body):
-    """Devolve (task, attempt_id) ou None se o corpo não for uma tarefa válida."""
+    """Returns (task, attempt_id) or None if the body is not a valid task."""
     try:
         data = json.loads(body)
     except (TypeError, ValueError):
@@ -48,13 +48,13 @@ class Worker:
         self.stopping = False
 
     def stop(self, signum=None, frame=None):
-        logger.info("Sinal %s recebido; encerrando após a mensagem atual", signum)
+        logger.info("Signal %s received; stopping after the current message", signum)
         self.stopping = True
 
     def handle_message(self, message):
         parsed = parse_body(message.get("Body"))
         if parsed is None:
-            logger.error("Mensagem %s com corpo inválido; apagando: %.200r",
+            logger.error("Message %s has an invalid body; deleting: %.200r",
                          message.get("MessageId"), message.get("Body"))
         else:
             task, attempt_id = parsed
@@ -66,7 +66,7 @@ class Worker:
                 close_old_connections()
             logger.info("task=%s attempt_id=%s ran=%s duration=%.1fs",
                         task, attempt_id, ran, time.monotonic() - started)
-        # Só apaga depois de processar (ou descartar um corpo inválido).
+        # Delete only after processing (or discarding an invalid body).
         self.client.delete_message(QueueUrl=self.queue_url, ReceiptHandle=message["ReceiptHandle"])
 
     def poll_once(self):
@@ -77,8 +77,8 @@ class Worker:
         )
         for message in response.get("Messages", []):
             if self.stopping:
-                # Sinal chegou durante o long polling: devolve a mensagem para outro worker
-                # em vez de começar uma fase que pode passar do stopTimeout.
+                # A signal arrived during long polling: hand the message back to another worker
+                # instead of starting a phase that may run past stopTimeout.
                 self.client.change_message_visibility(
                     QueueUrl=self.queue_url,
                     ReceiptHandle=message["ReceiptHandle"],
@@ -93,17 +93,17 @@ class Worker:
             try:
                 self.poll_once()
             except Exception:
-                logger.exception("Erro no loop do worker; nova tentativa em %ss", ERROR_BACKOFF_SECONDS)
+                logger.exception("Worker loop error; retrying in %ss", ERROR_BACKOFF_SECONDS)
                 time.sleep(ERROR_BACKOFF_SECONDS)
         logger.info("Worker encerrado")
 
 
 class Command(BaseCommand):
-    help = "Consome a fila SQS de fases (leitura/interpretação) e executa cada tarefa."
+    help = "Consumes the SQS phase queue (reading/interpretation) and runs each task."
 
     def handle(self, *args, **options):
         if not settings.ECG_TASK_QUEUE_URL:
-            raise CommandError("ECG_TASK_QUEUE_URL não definida.")
+            raise CommandError("ECG_TASK_QUEUE_URL is not set.")
         worker = Worker(settings.ECG_TASK_QUEUE_URL)
         signal.signal(signal.SIGTERM, worker.stop)
         signal.signal(signal.SIGINT, worker.stop)
@@ -114,7 +114,7 @@ class Command(BaseCommand):
         threads = [threading.Thread(target=worker.run, name=f"ecg-worker-{i}") for i in range(concurrency)]
         for thread in threads:
             thread.start()
-        # join com timeout: o sinal só é tratado na thread principal entre as esperas.
+        # join with a timeout: the signal is only handled on the main thread between waits.
         for thread in threads:
             while thread.is_alive():
                 thread.join(1)

@@ -1,23 +1,23 @@
-# ECG Backend — Django + Lambda única
+# ECG Backend: Django + single Lambda
 
-Este servidor atende ao frontend **Expo Go / Expo Web**. Utiliza o ECG Analyser como uma única Lambda para `analyze` e `refine`. Não retorna diagnóstico clínico automático.
+This server backs the **Expo Go / Expo Web** frontend. It uses the ECG Analyser as a single Lambda for `analyze` and `refine`. It does not return an automatic clinical diagnosis.
 
-## Fluxo
+## Flow
 
-1. `POST /api/auth/login/` recebe `username` e `password` e retorna `token` (DRF).
-2. `POST /api/exams/` cria o exame e os dados do paciente.
-3. `POST /api/exams/<exam_id>/attempts/` cria tentativa com `filename`, `content_type`, `speed_mm_s` e `gain_mm_mv`; devolve presigned PUT. Formatos: JPG, PNG, WebP.
-4. Expo envia **uma foto** ao S3 usando `PUT` com `Content-Type` idêntico ao assinado.
-5. `POST /api/exams/<exam_id>/attempts/<attempt_id>/process/` chama uma Lambda `analyze` e persiste artefatos; o `GET` na mesma rota recupera o estado sem reexecutar.
-6. `POST .../refine/` envia uma única derivação e pinceladas de inclusão/exclusão; a Lambda produz uma nova versão sem apagar arquivos anteriores. A imagem usada para pintura é a imagem de trabalho.
-7. `POST .../rejeitar/` rejeita um resultado que aguarda revisão; `POST .../aprovar/` confirma **a extração dos traçados**, não um laudo médico.
-8. `GET /api/exams/<exam_id>/` lista histórico e resultado; `POST /api/attempts/<attempt_id>/feedback/` registra feedback.
+1. `POST /api/auth/login/` takes `username` and `password` and returns a `token` (DRF).
+2. `POST /api/exams/` creates the exam and the patient data.
+3. `POST /api/exams/<exam_id>/attempts/` creates an attempt with `filename`, `content_type`, `speed_mm_s` and `gain_mm_mv`; returns a presigned PUT. Formats: JPG, PNG, WebP.
+4. Expo uploads **one photo** to S3 with a `PUT` whose `Content-Type` matches the signed one.
+5. `POST /api/exams/<exam_id>/attempts/<attempt_id>/process/` calls the `analyze` Lambda and stores the artifacts; a `GET` on the same route returns the state without rerunning.
+6. `POST .../refine/` sends a single lead and include/exclude brush strokes; the Lambda produces a new version without deleting earlier files. The image used for painting is the working image.
+7. `POST .../reject/` rejects a result awaiting review; `POST .../accept/` confirms **the trace extraction**, not a medical report.
+8. `GET /api/exams/<exam_id>/` lists history and result; `POST /api/attempts/<attempt_id>/feedback/` records feedback.
 
-Se a Lambda rejeitar uma imagem por contraste insuficiente, a mesma tentativa não pode ser refinada/aprovada: capture uma nova imagem.
+If the Lambda rejects an image for insufficient contrast, that attempt cannot be refined/approved: capture a new image.
 
-## Configuração
+## Setup
 
-Requisitos: Python 3.12+, Django 5.2, REST Framework, AWS Boto3, PostgreSQL ou SQLite de desenvolvimento.
+Requirements: Python 3.12+, Django 5.2, REST Framework, AWS Boto3, PostgreSQL, or SQLite for development.
 
 ```bash
 python -m venv .venv
@@ -28,38 +28,38 @@ python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
 ```
 
-Defina `DJANGO_SECRET_KEY` fora do ambiente de desenvolvimento, `DATABASE_URL`, `AWS_REGION`, `AWS_IMAGES_BUCKET`, `AWS_RESULTS_BUCKET`, `AWS_LAMBDA_ECG_ANALYSER`, origens de `CORS_ALLOWED_ORIGINS`, `ALLOWED_HOSTS` e credenciais/IAM AWS. **Não use `DEBUG=True` em produção.** Uma configuração sem secret real é rejeitada com `DEBUG=False`.
+Outside development, set `DJANGO_SECRET_KEY`, `DATABASE_URL`, `AWS_REGION`, `AWS_IMAGES_BUCKET`, `AWS_RESULTS_BUCKET`, `AWS_LAMBDA_ECG_ANALYSER`, the `CORS_ALLOWED_ORIGINS` origins, `ALLOWED_HOSTS` and the AWS credentials/IAM. **Do not use `DEBUG=True` in production.** A configuration without a real secret is rejected with `DEBUG=False`.
 
-Para Expo Web, autorize no Django e no CORS do S3 a origem exata do navegador. Para Expo Go no celular, use IP da rede local ou domínio HTTPS acessível ao telefone. `localhost` se refere ao próprio celular.
+For Expo Web, allow the browser's exact origin in Django and in the S3 CORS. For Expo Go on a phone, use the local network IP or an HTTPS domain the phone can reach. `localhost` refers to the phone itself.
 
-A Lambda precisa de `s3:GetObject` nos dois buckets e `s3:PutObject` no bucket de resultados; o Django precisa das permissões de invocação e geração de URLs pré-assinadas. A imagem de deploy é montada com o `Dockerfile.lambda` do ECG Analyser. **Nenhum deploy AWS é realizado pelo ZIP.**
+The Lambda needs `s3:GetObject` on both buckets and `s3:PutObject` on the results bucket; Django needs invoke permissions and presigned URL generation. The deploy image is built with the ECG Analyser `Dockerfile.lambda`. **No AWS deploy is done from the ZIP.**
 
-## App web e backend local (V1)
+## Web app and local backend (V1)
 
-O export web do app Expo (repo `leitor-ecg`) é servido pelo próprio Django, na mesma origem da API: WhiteNoise serve `frontend_dist/` e o catch-all de `config/spa.py` devolve o `index.html` para qualquer rota fora de `/api`, `/admin` e `/static` (recarregar numa tela interna, como `/exames/<id>/tentativas/<id>`, abre o app nela).
+The Expo app web export (repo `ecg-reader`) is served by Django itself, on the same origin as the API: WhiteNoise serves `frontend_dist/` and the catch-all in `config/spa.py` returns `index.html` for any route outside `/api`, `/admin` and `/static` (reloading on an inner screen, such as `/exams/<id>/attempts/<id>`, opens the app there).
 
 ```bash
-scripts/build_frontend.sh ../leitor-ecg        # npm ci + expo export --platform web → frontend_dist/
+scripts/build_frontend.sh ../ecg-reader        # npm ci + expo export --platform web -> frontend_dist/
 python scripts/local_server.py --async 3 --lambdas-repo ../ecg-lambdas-v1
-# Django + lambdas falsas + S3 falso, sem AWS; login dev / dev12345
+# Django + fake lambdas + fake S3, no AWS; login dev / dev12345
 ```
 
-A leitura local é um fake do contrato 2.0 (`scripts/local_lambdas.py`, com os cenários do campo `mock`); a interpretação é o handler mock do clone do [tl-gmiler/ecg-lambdas-v1](https://github.com/tl-gmiler/ecg-lambdas-v1).
+The local reading is a contract 2.0 fake (`scripts/local_lambdas.py`, with the `mock` field scenarios); the interpretation is the mock handler from a clone of [tl-gmiler/ecg-lambdas-v1](https://github.com/tl-gmiler/ecg-lambdas-v1).
 
-Abra `http://127.0.0.1:23132/`. O backend local só escuta em `127.0.0.1` (as URLs de upload também apontam para lá), então serve para a versão web; o Expo Go no celular aponta para a API de prod com `EXPO_PUBLIC_API_BASE_URL=<api_url>`. Em produção, o build do `frontend_dist/` roda no CodeBuild (`ci/buildspec-build.yml`).
+Open `http://127.0.0.1:23132/`. The local backend only listens on `127.0.0.1` (the upload URLs point there too), so it is for the web version; Expo Go on a phone points to the prod API with `EXPO_PUBLIC_API_BASE_URL=<api_url>`. In production, the `frontend_dist/` build runs in CodeBuild (`ci/buildspec-build.yml`).
 
-## Testes
+## Tests
 
 ```bash
-python manage.py test                     # suíte do backend (lambdas, S3 e SQS mockados)
-python manage.py check --deploy --fail-level WARNING  # após configurar produção
+python manage.py test                     # backend suite (lambdas, S3 and SQS mocked)
+python manage.py check --deploy --fail-level WARNING  # after configuring production
 ```
 
-A suíte `manage.py test` e a execução real de AWS exigem instalações e serviços não disponíveis no ambiente da auditoria. Para uso clínico, ainda são necessárias validação médica, tratamento de dados pessoais e processos regulatórios apropriados.
+The `manage.py test` suite and real AWS runs need installs and services that were not available in the audit environment. Clinical use still requires medical validation, personal data handling and the appropriate regulatory processes.
 
-Veja `INTEGRACAO_ECG.md` para contratos e limites adicionais. O contrato v1 das lambdas de leitura e interpretação (e as lambdas mock que o implementam) ficam no repo [tl-gmiler/ecg-lambdas-v1](https://github.com/tl-gmiler/ecg-lambdas-v1) ([`CONTRATO_LAMBDAS.md`](https://github.com/tl-gmiler/ecg-lambdas-v1/blob/main/CONTRATO_LAMBDAS.md)).
+See `ECG_INTEGRATION.md` for contracts and further limits. The v1 contract of the reading and interpretation lambdas (and the mock lambdas that implement it) lives in the [tl-gmiler/ecg-lambdas-v1](https://github.com/tl-gmiler/ecg-lambdas-v1) repo.
 
 
-## Atualização para uma Lambda (não executada na AWS)
+## Single-Lambda update (not run on AWS)
 
-Veja `INTEGRACAO_ECG.md`. Django opera na Oracle VM; S3/Lambda permanecem na AWS. `smoke_e2e.py` executa somente sob autorização explícita, cria dados e requer uma fotografia-teste real. Configure Gunicorn/proxy para POST síncrono longo ou implemente fila assíncrona. Valide migrations e `manage.py check --deploy` no ambiente de produção.
+See `ECG_INTEGRATION.md`. Django runs on the Oracle VM; S3/Lambda stay on AWS. `smoke_e2e.py` only runs with explicit authorization, creates data and needs a real test photo. Configure Gunicorn/proxy for a long synchronous POST, or implement an async queue. Validate migrations and `manage.py check --deploy` in the production environment.

@@ -26,10 +26,10 @@ class EnsureAdminTests(TestCase):
         self.assertTrue(user.check_password("Senha-forte-123"))
         self.assertNotIn("Senha-forte-123", output)
 
-        output = self.run_cmd(ADMIN_USERNAME="admin", ADMIN_PASSWORD="outra-senha")
+        output = self.run_cmd(ADMIN_USERNAME="admin", ADMIN_PASSWORD="other-password")
         self.assertEqual(User.objects.filter(username="admin").count(), 1)
         self.assertTrue(User.objects.get(username="admin").check_password("Senha-forte-123"))
-        self.assertIn("já existe", output)
+        self.assertIn("already exists", output)
 
     def test_requires_env(self):
         with mock.patch.dict(os.environ, {"ADMIN_USERNAME": "", "ADMIN_PASSWORD": ""}):

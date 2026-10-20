@@ -1,6 +1,6 @@
-"""Testes da API de exames: modelos e validação de entrada do contrato v1.
+"""Exam API tests: models and contract v1 input validation.
 
-As presigned URLs são mockadas em `exams.services.presign_put_url`; nenhum teste fala com a AWS.
+Presigned URLs are mocked at `exams.services.presign_put_url`; no test talks to AWS.
 """
 
 from unittest import mock
@@ -20,10 +20,10 @@ PRESIGN_PUT = "exams.services.presign_put_url"
 class BaseAPITestCase(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(
-            username="medico-teste", email="medico@test.local", password="senha-123", name="Médica Teste", crm="CRM-1"
+            username="test-doctor", email="doctor@test.local", password="pass-123", name="Test Doctor", crm="CRM-1"
         )
         self.other = User.objects.create_user(
-            username="outro-medico", email="outro@test.local", password="senha-123", name="Outro Médico", crm="CRM-2"
+            username="other-doctor", email="other@test.local", password="pass-123", name="Other Doctor", crm="CRM-2"
         )
         self.client.force_authenticate(user=self.user)
 
@@ -42,11 +42,11 @@ class BaseAPITestCase(APITestCase):
 class ExamListCreateTest(BaseAPITestCase):
     def test_create_exam_with_inline_patient(self):
         resp = self.client.post(reverse("exam-list"), {
-            "name": "Carlos", "age": 45, "sex": "M", "reason": "dor torácica",
+            "name": "Charles", "age": 45, "sex": "M", "reason": "chest pain",
         }, format="json")
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.data["status"], ExamStatus.CREATED)
-        self.assertEqual(resp.data["patient"]["name"], "Carlos")
+        self.assertEqual(resp.data["patient"]["name"], "Charles")
         self.assertEqual(resp.data["patient"]["sex"], "M")
         self.assertEqual(Patient.objects.get().sex, "M")
 
@@ -75,19 +75,19 @@ class ExamListCreateTest(BaseAPITestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_inline_patient_requires_sex(self):
-        resp = self.client.post(reverse("exam-list"), {"name": "Zé", "age": 50}, format="json")
+        resp = self.client.post(reverse("exam-list"), {"name": "Joe", "age": 50}, format="json")
         self.assertEqual(resp.status_code, 400)
         self.assertIn("sex", resp.data)
 
     def test_invalid_sex_refuses(self):
         for sex in ("X", "feminino", "f"):
-            resp = self.client.post(reverse("exam-list"), {"name": "Zé", "age": 50, "sex": sex}, format="json")
+            resp = self.client.post(reverse("exam-list"), {"name": "Joe", "age": 50, "sex": sex}, format="json")
             self.assertEqual(resp.status_code, 400, sex)
             self.assertIn("sex", resp.data)
 
     def test_age_range(self):
         for age, expected in ((-1, 400), (131, 400), (0, 201), (130, 201)):
-            resp = self.client.post(reverse("exam-list"), {"name": "Zé", "age": age, "sex": "M"}, format="json")
+            resp = self.client.post(reverse("exam-list"), {"name": "Joe", "age": age, "sex": "M"}, format="json")
             self.assertEqual(resp.status_code, expected, age)
 
     def test_create_exam_with_other_doctor_patient_refuses(self):
@@ -277,7 +277,7 @@ class FeedbackTest(BaseAPITestCase):
     def test_feedback_created(self):
         attempt = self._attempt(self._exame())
         resp = self.client.post(reverse("attempt-feedback", args=[attempt.id]), {
-            "issues": ["traçado errado"], "description": "QRS girado",
+            "issues": ["wrong trace"], "description": "QRS rotated",
         }, format="json")
         self.assertEqual(resp.status_code, 201)
         fb = Feedback.objects.get()

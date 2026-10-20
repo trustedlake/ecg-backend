@@ -1,22 +1,22 @@
 variable "aws_profile" {
   type        = string
-  description = "Perfil AWS local (~/.aws/credentials) usado pelo provider."
+  description = "Local AWS profile (~/.aws/credentials) used by the provider."
   default     = "trustedlake"
 }
 
 variable "ssh_allowed_cidr" {
   type        = string
-  description = "CIDR liberado no security group para SSH (porta 22). SEM default: obrigatório informar o IP de casa no apply. Ex.: 203.0.113.42/32"
+  description = "CIDR allowed in the security group for SSH (port 22). NO default: the home IP must be given at apply. E.g. 203.0.113.42/32"
 }
 
 variable "instance_type" {
   type        = string
-  description = "Tipo da instância EC2 (arm64/Graviton)."
+  description = "EC2 instance type (arm64/Graviton)."
   default     = "t4g.nano"
 }
 
 variable "key_name" {
   type        = string
-  description = "Se preenchido, reusa um key pair AWS existente em vez de gerar um novo. Deixe vazio para gerar (default)."
+  description = "If set, reuses an existing AWS key pair instead of generating a new one. Leave empty to generate (default)."
   default     = ""
 }

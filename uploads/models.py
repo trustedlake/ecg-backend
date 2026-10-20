@@ -5,9 +5,9 @@ from django.db import models
 
 
 class UploadBatch(models.Model):
-    """Um envio de fotos pela página /upload. Função temporária — sem
-    vínculo com Patient/Exam; só registra quem mandou o quê, confirmado
-    ou não."""
+    """A photo submission from the /upload page. Temporary feature: no
+    link to Patient/Exam; it only records who sent what, confirmed
+    or not."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -15,12 +15,12 @@ class UploadBatch(models.Model):
         on_delete=models.CASCADE,
         related_name="upload_batches",
     )
-    confirmado = models.BooleanField(default=False)
-    confirmado_em = models.DateTimeField(null=True, blank=True)
+    confirmed = models.BooleanField(default=False)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Batch {self.id} ({self.user_id}, confirmado={self.confirmado})"
+        return f"Batch {self.id} ({self.user_id}, confirmed={self.confirmed})"
 
     class Meta:
         ordering = ["-created_at"]
@@ -33,8 +33,8 @@ class UploadedFile(models.Model):
     )
     s3_key = models.CharField(max_length=500)
     content_type = models.CharField(max_length=100, null=True, blank=True)
-    nome_original = models.CharField(max_length=255, null=True, blank=True)
+    original_name = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.nome_original or self.s3_key} (batch {self.batch_id})"
+        return f"{self.original_name or self.s3_key} (batch {self.batch_id})"

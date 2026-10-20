@@ -1,11 +1,11 @@
-"""Leitura falsa no contrato 2.0 para o backend local (scripts/local_server.py).
+"""Fake contract 2.0 reading for the local backend (scripts/local_server.py).
 
-A `ecg-reading` de verdade é uma imagem de container (ecg-analyser) e não roda aqui. Este fake
-segue o envelope 2.0 (seis métodos, `files.{json,image,leads}`, avisos por método, sem `warnings`
-no topo) e os cenários do campo `mock`: success, success_with_warnings, refused, failure. O sinal
-é sintético (72 bpm); a prévia é a própria foto com o traçado desenhado por cima.
+The real `ecg-reading` is a container image (ecg-analyser) and does not run here. This fake
+follows the 2.0 envelope (six methods, `files.{json,image,leads}`, per-method warnings, no top-level
+`warnings`) and the `mock` field scenarios: success, success_with_warnings, refused, failure. The signal
+is synthetic (72 bpm); the preview is the photo itself with the trace drawn on top.
 
-Catálogo de erros/avisos: `ecg_contract` do repo tl-gmiler/ecg-lambdas-v1 (no sys.path).
+Error/warning catalog: `ecg_contract` from the tl-gmiler/ecg-lambdas-v1 repo (on sys.path).
 """
 
 import io
@@ -24,7 +24,7 @@ GAINS = (5, 10, 20)
 RATE_HZ = 250.0
 RR_S = 60 / 72
 
-# (nome, linha, coluna, início em s, duração em s); a tira de ritmo do 3x4+1 sai como II, kind rhythm.
+# (name, row, column, start in s, duration in s); the 3x4+1 rhythm strip comes out as II, kind rhythm.
 LAYOUTS = {
     "3x4+1": [(name, row, col, col * 2.5, 2.5)
               for row, names in enumerate((("I", "aVR", "V1", "V4"), ("II", "aVL", "V2", "V5"),
@@ -38,7 +38,7 @@ AMPLITUDE = {"I": 0.6, "II": 1.0, "III": 0.5, "aVR": -0.7, "aVL": 0.3, "aVF": 0.
 
 
 def _beat(t):
-    """Um batimento em mV (ondas P, QRS e T como gaussianas)."""
+    """One beat in mV (P, QRS and T waves as Gaussians)."""
     def g(center, width, height):
         return height * math.exp(-((t - center) / width) ** 2)
     return g(0.12, 0.03, 0.12) + g(0.24, 0.008, -0.1) + g(0.26, 0.011, 1.0) + g(0.28, 0.008, -0.2) + g(0.5, 0.05, 0.25)
@@ -87,7 +87,7 @@ def _png(image):
 
 
 def _preview(photo, layout, leads):
-    """Foto reduzida com a caixa e o traçado de cada derivação desenhados por cima."""
+    """Downscaled photo with each lead's box and trace drawn on top."""
     from PIL import ImageDraw
 
     image = photo.copy()
@@ -134,7 +134,7 @@ def handler(event, s3):
         env.scenario = scenario
         run = f"reading/{env.request_id}/{uuid.uuid4().hex[:8]}"
 
-        # Como a ecg-reading real com `mock` (conferido em 19/10): recusa e erro sem `details`.
+        # Like the real ecg-reading with `mock` (checked on 2026-10-19): refusal and error without `details`.
         if scenario == "failure":
             raise ContractError("READ_TRACE_EXTRACTION_FAILED")
         if scenario == "refused":
@@ -163,12 +163,12 @@ def handler(event, s3):
             elif scenario == "success_with_warnings" and index % 2:
                 methods.append(_method(name, "ABSTAINED", reason="no_measured_lead"))
             else:
-                # Os outros métodos OK reaproveitam os arquivos do escolhido (o backend só lê o melhor).
+                # The other OK methods reuse the chosen one's files (the backend only reads the best one).
                 methods.append(_method(name, "OK", 40.0 + index, files=files))
         result = {"layout": layout, "calibration": calibration, "units": "mV", "methods": methods}
         response = env._build("OK_WITH_WARNINGS" if warnings else "OK", result=result)
     except ContractError as exc:
         response = env.failure(exc)
-    # Contrato 2.0: os avisos ficam em cada método, não no topo do envelope.
+    # Contract 2.0: warnings live on each method, not at the top of the envelope.
     response.pop("warnings", None)
     return response

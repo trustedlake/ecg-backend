@@ -1,6 +1,6 @@
 from django.db import migrations
 
-# Estados do pipeline ecg-analyser → estados do contrato v1 (docs/fluxo-usuario-v1.md §3).
+# Estados do pipeline ecg-analyser → estados do contrato v1 (docs/user-flow-v1.md §3).
 # Processamento interrompido vira erro: a tentativa não tem como continuar no fluxo novo.
 STATUS_MAP = {
     "fase_a_processando": "erro_leitura",

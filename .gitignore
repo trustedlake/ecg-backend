@@ -17,24 +17,6 @@ db.sqlite3
 staticfiles/
 media/
 
-# Terraform
-infra/terraform/.terraform/
-infra/terraform/*.tfstate
-infra/terraform/*.tfstate.*
-infra/terraform/crash.log
-
-# Terraform (infra-oracle/)
-infra-oracle/.terraform/
-infra-oracle/*.tfstate
-infra-oracle/*.tfstate.backup
-infra-oracle/.terraform.lock.hcl
-infra-oracle/tfplan*
-infra-oracle/terraform.tfvars
-
-# Private/public keys generated locally (never commit them), but do commit the script that generates them
-infra/keys/*
-!infra/keys/generate-key.sh
-
 # IDE / OS
 .idea/
 .vscode/

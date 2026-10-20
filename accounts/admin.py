@@ -6,7 +6,7 @@ from .models import User
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    """UserAdmin adaptado: username livre é o identificador de login."""
+    """Adapted UserAdmin: a free-form username is the login identifier."""
 
     ordering = ["username"]
     list_display = ["username", "email", "name", "crm", "is_staff", "is_active"]
@@ -16,7 +16,7 @@ class UserAdmin(BaseUserAdmin):
         ("Dados", {"fields": ("name", "email", "crm")}),
         ("Status", {"fields": ("is_active", "is_staff", "is_superuser")}),
         ("Datas", {"fields": ("last_login", "created_at", "updated_at")}),
-        ("Permissões", {"fields": ("groups", "user_permissions")}),
+        ("Permissions", {"fields": ("groups", "user_permissions")}),
     )
     add_fieldsets = (
         (None, {"classes": ("wide",), "fields": ("username", "email", "name", "password1", "password2")}),

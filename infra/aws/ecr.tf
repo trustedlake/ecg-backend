@@ -13,7 +13,7 @@ resource "aws_ecr_lifecycle_policy" "backend" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Mantém as 10 imagens mais recentes"
+      description  = "Keeps the 10 most recent images"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"

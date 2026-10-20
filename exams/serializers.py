@@ -16,8 +16,8 @@ EXT_BY_CONTENT_TYPE = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "w
 SPEED_CHOICES = [12.5, 25, 50]
 GAIN_CHOICES = [5, 10, 20]
 
-# Cenários do campo `mock` das lambdas (ecg-lambdas-v1): cenário → códigos aceitos.
-# A ecg-reading 2.0 só recebe o cenário; o código da recusa/erro é decidido por ela.
+# Scenarios for the lambdas' `mock` field (ecg-lambdas-v1): scenario -> accepted codes.
+# ecg-reading 2.0 only receives the scenario; it picks the refusal/error code itself.
 READ_SCENARIOS = {
     "success": (),
     "success_with_warnings": (),
@@ -39,7 +39,7 @@ class PatientSerializer(serializers.ModelSerializer):
 
 
 class ExamCreateSerializer(serializers.Serializer):
-    """Cria exame com patient_id (existente do médico) OU paciente inline."""
+    """Creates an exam with patient_id (the doctor's existing patient) OR an inline patient."""
 
     patient_id = serializers.UUIDField(required=False, allow_null=True)
     name = serializers.CharField(max_length=255, required=False)
@@ -52,14 +52,14 @@ class ExamCreateSerializer(serializers.Serializer):
         has_inline = any(attrs.get(f) is not None for f in ("name", "age", "sex"))
         if has_patient_id == has_inline:
             raise serializers.ValidationError(
-                "Informe patient_id (paciente existente) OU os dados do "
-                "paciente (name, age, sex) — exatamente um dos dois."
+                "Provide patient_id (existing patient) OR the patient "
+                "data (name, age, sex): exactly one of the two."
             )
         if has_inline:
             missing = [f for f in ("name", "age", "sex") if attrs.get(f) in (None, "")]
             if missing:
                 raise serializers.ValidationError(
-                    {f: "Obrigatório para paciente novo." for f in missing}
+                    {f: "Required for a new patient." for f in missing}
                 )
         return attrs
 
@@ -72,7 +72,7 @@ class ExamCreateSerializer(serializers.Serializer):
                 )
             except Patient.DoesNotExist:
                 raise serializers.ValidationError(
-                    {"patient_id": "Paciente não encontrado para este médico."}
+                    {"patient_id": "Patient not found for this doctor."}
                 )
         else:
             patient = Patient.objects.create(
@@ -89,10 +89,10 @@ class ExamCreateSerializer(serializers.Serializer):
 
 
 class AttemptSerializer(serializers.ModelSerializer):
-    """Objeto `Attempt` da API (plano §0.1). URLs presigned geradas a cada resposta."""
+    """API `Attempt` object (plan §0.1). Presigned URLs generated on every response."""
 
     exam_id = serializers.UUIDField(read_only=True)
-    calibration = serializers.JSONField(source="calibracao")
+    calibration = serializers.JSONField()
     original_image_url = serializers.SerializerMethodField()
     reading = serializers.SerializerMethodField()
     interpretation = serializers.SerializerMethodField()
@@ -154,19 +154,19 @@ class ScenarioSerializer(serializers.Serializer):
         scenario = attrs["scenario"]
         if scenario not in self.catalog:
             raise serializers.ValidationError(
-                {"scenario": f"Cenário inválido. Aceitos: {', '.join(self.catalog)}."}
+                {"scenario": f"Invalid scenario. Accepted: {', '.join(self.catalog)}."}
             )
         code = attrs.get("code")
         if code is not None and code not in self.catalog[scenario]:
-            allowed = ", ".join(self.catalog[scenario]) or "nenhum"
+            allowed = ", ".join(self.catalog[scenario]) or "none"
             raise serializers.ValidationError(
-                {"code": f"Código inválido para '{scenario}'. Aceitos: {allowed}."}
+                {"code": f"Invalid code for '{scenario}'. Accepted: {allowed}."}
             )
         return attrs
 
 
 class TestScenarioSerializer(serializers.Serializer):
-    """`{"read": {...}, "interpret": {...}}` — repassado como `mock` às lambdas."""
+    """`{"read": {...}, "interpret": {...}}`, forwarded as `mock` to the lambdas."""
 
     read = ScenarioSerializer(required=False, catalog=READ_SCENARIOS)
     interpret = ScenarioSerializer(required=False, catalog=INTERPRET_SCENARIOS)
@@ -176,27 +176,27 @@ class TestScenarioSerializer(serializers.Serializer):
             unknown = set(data) - {"read", "interpret"}
             if unknown:
                 raise serializers.ValidationError(
-                    f"Chaves não suportadas: {', '.join(sorted(unknown))}."
+                    f"Unsupported keys: {', '.join(sorted(unknown))}."
                 )
         return super().to_internal_value(data)
 
     def validate(self, attrs):
         if not attrs:
-            raise serializers.ValidationError("Informe 'read' e/ou 'interpret'.")
+            raise serializers.ValidationError("Provide 'read' and/or 'interpret'.")
         return attrs
 
 
 class AttemptCreateSerializer(serializers.Serializer):
-    """Cria a tentativa e devolve a presigned PUT URL para o app subir a foto.
+    """Creates the attempt and returns the presigned PUT URL for the app to upload the photo.
 
-    O `content_type` é assinado na URL: o app DEVE enviar o mesmo valor no header
-    Content-Type do PUT (devolvido em `upload_headers`).
+    The `content_type` is signed into the URL: the app MUST send the same value in the
+    PUT Content-Type header (returned in `upload_headers`).
     """
 
     filename = serializers.CharField(max_length=255)
     content_type = serializers.ChoiceField(choices=list(EXT_BY_CONTENT_TYPE))
     layout = serializers.ChoiceField(choices=[(layout.value, layout.label) for layout in SUPPORTED_LAYOUTS])
-    # FloatField + checagem explícita: ChoiceField compara por texto e recusaria 25.0.
+    # FloatField + explicit check: ChoiceField compares as text and would reject 25.0.
     speed_mm_s = serializers.FloatField(default=25)
     gain_mm_mv = serializers.FloatField(default=10)
     test_scenario = TestScenarioSerializer(required=False)
@@ -206,25 +206,25 @@ class AttemptCreateSerializer(serializers.Serializer):
         ext = value[dot + 1:].lower() if dot != -1 else ""
         if ext not in CONTENT_TYPE_BY_EXT:
             raise serializers.ValidationError(
-                "Extensão não suportada; envie JPG, PNG ou WebP."
+                "Unsupported extension; send JPG, PNG or WebP."
             )
         return value
 
     def validate_speed_mm_s(self, value):
         if value not in SPEED_CHOICES:
-            raise serializers.ValidationError("Velocidade aceita: 12.5, 25 ou 50 mm/s.")
+            raise serializers.ValidationError("Accepted speed: 12.5, 25 or 50 mm/s.")
         return value
 
     def validate_gain_mm_mv(self, value):
         if value not in GAIN_CHOICES:
-            raise serializers.ValidationError("Ganho aceito: 5, 10 ou 20 mm/mV.")
+            raise serializers.ValidationError("Accepted gain: 5, 10 or 20 mm/mV.")
         return value
 
     def validate_test_scenario(self, value):
         user = self.context["request"].user
         if not (settings.ECG_TEST_SCENARIOS_ENABLED and user.is_staff):
             raise serializers.ValidationError(
-                "Cenários de teste não estão disponíveis para este usuário."
+                "Test scenarios are not available for this user."
             )
         return value
 
@@ -232,7 +232,7 @@ class AttemptCreateSerializer(serializers.Serializer):
         ext = attrs["filename"].rsplit(".", 1)[1].lower()
         if CONTENT_TYPE_BY_EXT[ext] != attrs["content_type"]:
             raise serializers.ValidationError(
-                {"content_type": "O tipo não corresponde à extensão do arquivo."}
+                {"content_type": "The type does not match the file extension."}
             )
         attrs["_ext"] = EXT_BY_CONTENT_TYPE[attrs["content_type"]]
         return attrs

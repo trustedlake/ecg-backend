@@ -1,64 +1,64 @@
-# Infra-oracle (Terraform) — ecg-backend
+# Infra-oracle (Terraform): ecg-backend
 
-Gerencia a migração deste app da EC2 AWS compartilhada pra VM Oracle Cloud
-compartilhada (`147.15.66.165`, mesma onde já rodam Lakeship, `persona`, `content` e
-`publy_click_lps`), como container Docker `ecg-backend` na porta **8014** do host.
+Manages the move of this app from the shared AWS EC2 to the shared Oracle Cloud VM
+(`147.15.66.165`, the same one that already runs Lakeship, `persona`, `content` and
+`publy_click_lps`), as the Docker container `ecg-backend` on host port **8014**.
 
-## CloudFront existente é reapontado manualmente (fora do Terraform)
+## The existing CloudFront is repointed by hand (outside Terraform)
 
-O app já é público hoje via CloudFront `d1i155fprtk4at.cloudfront.net`
-(`E1919M81GCZ1D7`), usado por apps reais (`app.leitorecg.com.br`, etc — ver
-`CORS_ALLOWED_ORIGINS`). Essa distribuição é gerenciada pelo terraform ANTIGO deste
-repo (`infra/terraform/`), cujo state já está desatualizado (a EC2 dedicada que ele
-criava foi terminada; hoje o app roda na EC2 compartilhada, reapontado manualmente).
+The app is already public through the CloudFront `d1i155fprtk4at.cloudfront.net`
+(`E1919M81GCZ1D7`), used by real apps (the web app domains; see
+`CORS_ALLOWED_ORIGINS`). That distribution is managed by the OLD terraform in this
+repo (`infra/terraform/`), whose state is already stale (the dedicated EC2 it
+created was terminated; the app now runs on the shared EC2, repointed by hand).
 
-Pra não arriscar conflito de state com o terraform antigo, **este módulo não
-gerencia o CloudFront** — depois que o container aqui estiver validado, o reapontamento
-do origin (de `ec2-56-125-136-251...` pra `vm.publy.click:8014`) é feito manualmente via
+To avoid a state conflict with the old terraform, **this module does not
+manage the CloudFront**: once the container here is validated, the origin
+(from `ec2-56-125-136-251...` to `vm.publy.click:8014`) is repointed by hand with the
 AWS CLI:
 
 ```bash
 aws cloudfront get-distribution-config --id E1919M81GCZ1D7 --profile trustedlake > /tmp/cf.json
-# editar origin/custom_origin_config pra vm.publy.click:8014, usar o ETag do get acima
+# edit origin/custom_origin_config to vm.publy.click:8014, use the ETag from the get above
 aws cloudfront update-distribution --id E1919M81GCZ1D7 --profile trustedlake \
   --distribution-config file:///tmp/cf-edited.json --if-match <ETAG>
 ```
 
-Domínio continua sendo `d1i155fprtk4at.cloudfront.net` — não muda, então
-`ALLOWED_HOSTS`/`CORS_ALLOWED_ORIGINS` do app não precisam mudar.
+The domain stays `d1i155fprtk4at.cloudfront.net`; it does not change, so the app's
+`ALLOWED_HOSTS`/`CORS_ALLOWED_ORIGINS` do not need to change.
 
-## Credencial AWS pro boto3 (lambdas + S3)
+## AWS credentials for boto3 (lambdas + S3)
 
-O app chama 3 lambdas (`ecg-lambdas-lambda-{1,2,3}-...`) e lê/grava em 2 buckets S3
-(`ecg-lambdas-images-...`, `ecg-lambdas-results-...`). Na EC2 isso funciona via IAM role
-da instância — a VM Oracle não tem IAM role (não é AWS), então precisa de
-`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` explícitas em `app_env` (mesma decisão já
-tomada pro `content`: reusar a `trustedlake-key` existente).
+The app calls 3 lambdas (`ecg-lambdas-lambda-{1,2,3}-...`) and reads/writes 2 S3 buckets
+(`ecg-lambdas-images-...`, `ecg-lambdas-results-...`). On the EC2 this works through the
+instance IAM role; the Oracle VM has no IAM role (it is not AWS), so it needs
+explicit `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` in `app_env` (same decision already
+taken for `content`: reuse the existing `trustedlake-key`).
 
-## Uso
+## Usage
 
 ```bash
 cd infra-oracle
-# criar terraform.tfvars com vm_ssh_private_key_path e app_env (DEBUG, ALLOWED_HOSTS,
+# create terraform.tfvars with vm_ssh_private_key_path and app_env (DEBUG, ALLOWED_HOSTS,
 # DATABASE_URL, DJANGO_SECRET_KEY, AWS_REGION, CORS_ALLOWED_ORIGINS, AWS_ACCESS_KEY_ID,
-# AWS_SECRET_ACCESS_KEY - mesmas chaves do .env de produção hoje)
+# AWS_SECRET_ACCESS_KEY: the same keys as today's production .env)
 terraform init
 terraform plan
 terraform apply
 ```
 
-## Como testar (antes de reapontar o CloudFront de verdade)
+## How to test (before actually repointing the CloudFront)
 
-- Túnel SSH: `ssh -L 8014:localhost:8014 ubuntu@147.15.66.165` e
+- SSH tunnel: `ssh -L 8014:localhost:8014 ubuntu@147.15.66.165` and
   `curl -X POST http://localhost:8014/api/auth/login/ -H 'Host: d1i155fprtk4at.cloudfront.net' -H 'Content-Type: application/json' -d '{}'`
-  (mesmo health check do `infra/deploy.sh` antigo — espera 200 ou 400).
-- Depois de reapontar o CloudFront: `curl https://d1i155fprtk4at.cloudfront.net/...` deve
-  responder da VM Oracle.
+  (same health check as the old `infra/deploy.sh`; expects 200 or 400).
+- After repointing the CloudFront: `curl https://d1i155fprtk4at.cloudfront.net/...` should
+  answer from the Oracle VM.
 
-## Open questions (decisão do usuário)
+## Open questions (user decision)
 
-1. Terraform antigo (`infra/terraform/`) está órfão/com drift real — vale a pena, numa
-   etapa futura separada, reconciliar ou apagar esse state (`ecg-lambdas-terraform-state`
+1. The old Terraform (`infra/terraform/`) is orphaned with real drift: is it worth, in a separate
+   future step, reconciling or deleting that state (`ecg-lambdas-terraform-state`
    bucket, key `ecg-backend/terraform.tfstate`)?
-2. Quando desligar o `ecg-backend.service` antigo na EC2 compartilhada, depois de
-   validado.
+2. When to shut down the old `ecg-backend.service` on the shared EC2, once
+   validated.

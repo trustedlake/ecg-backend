@@ -1,7 +1,7 @@
-# CI/CD na AWS: CodePipeline V2 (QUEUED) com duas fontes GitHub → CodeBuild ARM test → build → deploy.
-# Buildspecs e deploy em ci/. A conexão do GitHub nasce PENDENTE: autorizar no console (ver README).
+# CI/CD on AWS: CodePipeline V2 (QUEUED) with two GitHub sources -> CodeBuild ARM test -> build -> deploy.
+# Buildspecs and deploy in ci/. The GitHub connection starts PENDING: authorize it in the console (see README).
 
-# Cada conta do GitHub precisa da sua própria conexão (uma conexão = uma instalação do app da AWS).
+# Each GitHub account needs its own connection (one connection = one install of the AWS app).
 variable "backend_owner" {
   type    = string
   default = "tl-gmiler"
@@ -19,7 +19,7 @@ variable "frontend_owner" {
 
 variable "frontend_repo" {
   type    = string
-  default = "leitor-ecg"
+  default = "ecg-reader"
 }
 
 variable "pipeline_branch" {
@@ -77,7 +77,7 @@ resource "aws_cloudwatch_log_group" "codebuild" {
   retention_in_days = var.log_retention_days
 }
 
-# --- Roles do CodeBuild (uma por etapa) ---
+# --- CodeBuild roles (one per stage) ---
 
 data "aws_iam_policy_document" "codebuild_assume" {
   statement {
@@ -97,7 +97,7 @@ data "aws_iam_policy_document" "codebuild_assume" {
 locals {
   codebuild_stages = toset(["test", "build", "deploy"])
 
-  # Comum às 3: logs no grupo próprio e leitura dos artefatos (build e deploy também gravam).
+  # Common to all 3: logs in their own group and artifact reads (build and deploy also write).
   codebuild_base_statements = [
     {
       sid       = "Logs"
@@ -143,7 +143,7 @@ locals {
         resources = [local.ecs_service_arn]
       },
       {
-        # Describe/Register de task definition não aceitam ARN de recurso.
+        # Task definition Describe/Register do not accept a resource ARN.
         sid       = "TaskDefinitions"
         actions   = ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"]
         resources = ["*"]
@@ -170,7 +170,7 @@ locals {
         resources = [aws_db_instance.this.arn]
       },
       {
-        # Application Auto Scaling não tem permissão por recurso para estas ações.
+        # Application Auto Scaling has no per-resource permission for these actions.
         sid       = "Autoscaling"
         actions   = ["application-autoscaling:DescribeScalableTargets", "application-autoscaling:RegisterScalableTarget"]
         resources = ["*"]
@@ -420,7 +420,7 @@ resource "aws_codepipeline" "this" {
     }
   }
 
-  # Push na main de qualquer um dos dois repos dispara o pipeline.
+  # A push to main in either repo triggers the pipeline.
   trigger {
     provider_type = "CodeStarSourceConnection"
     git_configuration {
@@ -450,7 +450,7 @@ resource "aws_codepipeline" "this" {
 
 resource "aws_cloudwatch_event_rule" "pipeline_failed" {
   name        = "ecg-pipeline-failed"
-  description = "Execução do pipeline ecg-backend falhou"
+  description = "ecg-backend pipeline execution failed"
   event_pattern = jsonencode({
     source      = ["aws.codepipeline"]
     detail-type = ["CodePipeline Pipeline Execution State Change"]
@@ -470,7 +470,7 @@ resource "aws_cloudwatch_event_target" "pipeline_failed" {
       pipeline  = "$.detail.pipeline"
       execution = "$.detail.execution-id"
     }
-    input_template = "\"Pipeline <pipeline> falhou (execução <execution>). Veja o CodePipeline no console, região ${var.region}.\""
+    input_template = "\"Pipeline <pipeline> failed (execution <execution>). See CodePipeline in the console, region ${var.region}.\""
   }
 }
 
@@ -526,11 +526,11 @@ output "pipeline_name" {
 }
 
 output "github_connection_arn" {
-  description = "Conexão do backend (conta tl-gmiler). PENDENTE até ser autorizada no console (Developer Tools > Connections)."
+  description = "Backend connection (tl-gmiler account). PENDING until authorized in the console (Developer Tools > Connections)."
   value       = aws_codestarconnections_connection.github.arn
 }
 
 output "github_frontend_connection_arn" {
-  description = "Conexão do app (conta trustedlake). PENDENTE até ser autorizada no console por quem entra como trustedlake."
+  description = "App connection (trustedlake account). PENDING until authorized in the console by someone signed in as trustedlake."
   value       = aws_codestarconnections_connection.github_frontend.arn
 }

@@ -1,7 +1,7 @@
-# Imagem única do backend ECG (plano B4): container `web` (CMD padrão, gunicorn) e
+# Single ECG backend image (plan B4): `web` container (default CMD, gunicorn) and
 # container `worker` (task definition sobrescreve o command: python manage.py ecg_worker).
 # Build: docker build --platform linux/arm64 -t ecg-backend:local .
-# O export web do Expo, se existir em frontend_dist/, entra na imagem e é servido pelo Django.
+# The Expo web export, if present in frontend_dist/, goes into the image and is served by Django.
 
 FROM public.ecr.aws/docker/library/python:3.12-slim AS deps
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -21,7 +21,7 @@ WORKDIR /app
 COPY --from=deps /venv /venv
 COPY --chown=app:app . /app
 
-# collectstatic no build (admin/DRF + manifest do WhiteNoise); a chave é fictícia e só existe aqui.
+# collectstatic at build time (admin/DRF + WhiteNoise manifest); the key is a dummy and only exists here.
 RUN DJANGO_SECRET_KEY=build-only-not-secret DEBUG=False \
     python manage.py collectstatic --noinput \
     && chown -R app:app /app/staticfiles

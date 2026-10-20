@@ -1,5 +1,5 @@
-# Infra de produção do backend ECG (docs/plano-migracao-v1.md §0, etapas I1–I3).
-# Esta stack NÃO gerencia os buckets nem as lambdas: eles vêm dos stacks ecg-lambdas e mock_lambdas.
+# Production infra for the ECG backend (docs/migration-plan-v1.md §0, steps I1-I3).
+# This stack does NOT manage the buckets or the lambdas: they come from the ecg-lambdas and mock_lambdas stacks.
 
 terraform {
   required_version = ">= 1.11"
@@ -7,7 +7,7 @@ terraform {
   required_providers {
     aws = {
       source = "hashicorp/aws"
-      # 6.x: password_wo em aws_db_instance e ephemeral aws_ssm_parameter (testado com 6.69.1).
+      # 6.x: password_wo on aws_db_instance and ephemeral aws_ssm_parameter (tested with 6.69.1).
       version = "~> 6.69"
     }
   }

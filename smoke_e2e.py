@@ -18,9 +18,9 @@ BASE=os.environ.get('SMOKE_BASE_URL','http://127.0.0.1:8001').rstrip('/')
 def main():
     image=os.environ.get('SMOKE_IMAGE_PATH')
     if not image or not pathlib.Path(image).is_file():
-        raise SystemExit('Informe SMOKE_IMAGE_PATH com foto ECG controlada')
+        raise SystemExit('Set SMOKE_IMAGE_PATH to a controlled ECG photo')
     if os.environ.get('SMOKE_ALLOW_MUTATIONS')!='YES':
-        raise SystemExit('SMOKE_ALLOW_MUTATIONS=YES é obrigatório; rode só em ambiente descartável')
+        raise SystemExit('SMOKE_ALLOW_MUTATIONS=YES is required; run only in a disposable environment')
     username='smoke-'+uuid.uuid4().hex[:10]
     User=get_user_model()
     user=User.objects.create_user(username=username,email=username+'@example.test',password='Smoke!123',name='Smoke',crm='TEMP')
@@ -41,7 +41,7 @@ def main():
         attempt=api('POST',f'/api/exams/{eid}/attempts/',json={'filename':pathlib.Path(image).name,'content_type':'image/png','speed_mm_s':25,'gain_mm_mv':10})
         aid=attempt['attempt_id']
         attempt_id=aid
-        uploaded_image_key=attempt['imagem_s3_key']
+        uploaded_image_key=attempt['image_s3_key']
         b=pathlib.Path(image).read_bytes()
         r=requests.put(attempt['upload_url'],data=b,headers={'Content-Type':'image/png'},timeout=90)
         r.raise_for_status()

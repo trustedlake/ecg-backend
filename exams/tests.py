@@ -1,6 +1,6 @@
-"""Testes da API de exames: modelos e validação de entrada do contrato v1.
+"""Exam API tests: models and contract v1 input validation.
 
-As presigned URLs são mockadas em `exams.services.presign_put_url`; nenhum teste fala com a AWS.
+Presigned URLs are mocked at `exams.services.presign_put_url`; no test talks to AWS.
 """
 
 from unittest import mock
@@ -20,10 +20,10 @@ PRESIGN_PUT = "exams.services.presign_put_url"
 class BaseAPITestCase(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(
-            username="medico-teste", email="medico@test.local", password="senha-123", name="Médica Teste", crm="CRM-1"
+            username="test-doctor", email="doctor@test.local", password="pass-123", name="Test Doctor", crm="CRM-1"
         )
         self.other = User.objects.create_user(
-            username="outro-medico", email="outro@test.local", password="senha-123", name="Outro Médico", crm="CRM-2"
+            username="other-doctor", email="other@test.local", password="pass-123", name="Other Doctor", crm="CRM-2"
         )
         self.client.force_authenticate(user=self.user)
 
@@ -31,22 +31,22 @@ class BaseAPITestCase(APITestCase):
         p = Patient.objects.create(doctor=doctor or self.user, name="Ana", age=30, sex="F")
         return Exam.objects.create(patient=p, doctor=doctor or self.user, reason="rotina")
 
-    def _attempt(self, exam, status_=ExamStatus.CRIADO, **kwargs):
-        kwargs.setdefault("calibracao", {"speed_mm_s": 25, "gain_mm_mv": 10})
+    def _attempt(self, exam, status_=ExamStatus.CREATED, **kwargs):
+        kwargs.setdefault("calibration", {"speed_mm_s": 25, "gain_mm_mv": 10})
         return ExamAttempt.objects.create(
             exam=exam, status=status_,
-            imagem_s3_key=f"{exam.id}/a/original.png", **kwargs,
+            image_s3_key=f"{exam.id}/a/original.png", **kwargs,
         )
 
 
 class ExamListCreateTest(BaseAPITestCase):
     def test_create_exam_with_inline_patient(self):
         resp = self.client.post(reverse("exam-list"), {
-            "name": "Carlos", "age": 45, "sex": "M", "reason": "dor torácica",
+            "name": "Charles", "age": 45, "sex": "M", "reason": "chest pain",
         }, format="json")
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["status"], ExamStatus.CRIADO)
-        self.assertEqual(resp.data["patient"]["name"], "Carlos")
+        self.assertEqual(resp.data["status"], ExamStatus.CREATED)
+        self.assertEqual(resp.data["patient"]["name"], "Charles")
         self.assertEqual(resp.data["patient"]["sex"], "M")
         self.assertEqual(Patient.objects.get().sex, "M")
 
@@ -75,19 +75,19 @@ class ExamListCreateTest(BaseAPITestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_inline_patient_requires_sex(self):
-        resp = self.client.post(reverse("exam-list"), {"name": "Zé", "age": 50}, format="json")
+        resp = self.client.post(reverse("exam-list"), {"name": "Joe", "age": 50}, format="json")
         self.assertEqual(resp.status_code, 400)
         self.assertIn("sex", resp.data)
 
     def test_invalid_sex_refuses(self):
         for sex in ("X", "feminino", "f"):
-            resp = self.client.post(reverse("exam-list"), {"name": "Zé", "age": 50, "sex": sex}, format="json")
+            resp = self.client.post(reverse("exam-list"), {"name": "Joe", "age": 50, "sex": sex}, format="json")
             self.assertEqual(resp.status_code, 400, sex)
             self.assertIn("sex", resp.data)
 
     def test_age_range(self):
         for age, expected in ((-1, 400), (131, 400), (0, 201), (130, 201)):
-            resp = self.client.post(reverse("exam-list"), {"name": "Zé", "age": age, "sex": "M"}, format="json")
+            resp = self.client.post(reverse("exam-list"), {"name": "Joe", "age": age, "sex": "M"}, format="json")
             self.assertEqual(resp.status_code, expected, age)
 
     def test_create_exam_with_other_doctor_patient_refuses(self):
@@ -132,10 +132,10 @@ class AttemptCreateTest(BaseAPITestCase):
         self.assertEqual(resp.data["upload_headers"], {"Content-Type": "image/jpeg"})
         attempt = ExamAttempt.objects.get()
         self.assertEqual(str(attempt.id), resp.data["attempt_id"])
-        self.assertTrue(attempt.imagem_s3_key.endswith(f"/{exam.id}/{attempt.id}/original.jpg"))
-        self.assertEqual(attempt.status, ExamStatus.CRIADO)
+        self.assertTrue(attempt.image_s3_key.endswith(f"/{exam.id}/{attempt.id}/original.jpg"))
+        self.assertEqual(attempt.status, ExamStatus.CREATED)
         self.assertEqual(attempt.layout, "3x4+1")
-        self.assertEqual(attempt.calibracao, {"speed_mm_s": 25, "gain_mm_mv": 10})
+        self.assertEqual(attempt.calibration, {"speed_mm_s": 25, "gain_mm_mv": 10})
         self.assertIsNone(attempt.test_scenario)
         self.assertEqual(put.call_args.kwargs["content_type"], "image/jpeg")
 
@@ -162,7 +162,7 @@ class AttemptCreateTest(BaseAPITestCase):
         exam = self._exame()
         resp = self._post(exam, speed_mm_s=12.5, gain_mm_mv=20)
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(ExamAttempt.objects.get().calibracao, {"speed_mm_s": 12.5, "gain_mm_mv": 20})
+        self.assertEqual(ExamAttempt.objects.get().calibration, {"speed_mm_s": 12.5, "gain_mm_mv": 20})
         self.assertEqual(self._post(exam, speed_mm_s=50.0, gain_mm_mv=5.0).status_code, 201)
         for field, value in (("speed_mm_s", 100), ("speed_mm_s", 5), ("gain_mm_mv", 1), ("gain_mm_mv", 2)):
             resp = self._post(exam, **{field: value})
@@ -188,12 +188,12 @@ class AttemptCreateTest(BaseAPITestCase):
 
     def test_new_attempt_resets_exam_status(self, _put):
         exam = self._exame()
-        self._attempt(exam, ExamStatus.LEITURA_RECUSADA)
-        exam.status = ExamStatus.LEITURA_RECUSADA
+        self._attempt(exam, ExamStatus.READING_REFUSED)
+        exam.status = ExamStatus.READING_REFUSED
         exam.save()
         self.assertEqual(self._post(exam).status_code, 201)
         exam.refresh_from_db()
-        self.assertEqual(exam.status, ExamStatus.CRIADO)
+        self.assertEqual(exam.status, ExamStatus.CREATED)
 
     def test_foreign_exam_not_found(self, _put):
         exam = self._exame(doctor=self.other)
@@ -277,7 +277,7 @@ class FeedbackTest(BaseAPITestCase):
     def test_feedback_created(self):
         attempt = self._attempt(self._exame())
         resp = self.client.post(reverse("attempt-feedback", args=[attempt.id]), {
-            "issues": ["traçado errado"], "description": "QRS girado",
+            "issues": ["wrong trace"], "description": "QRS rotated",
         }, format="json")
         self.assertEqual(resp.status_code, 201)
         fb = Feedback.objects.get()

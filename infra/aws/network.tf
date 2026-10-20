@@ -1,5 +1,5 @@
-# VPC própria sem NAT nem endpoints: tasks em subnet pública (IP público só para saída,
-# SG sem entrada da internet) e RDS em subnet privada sem rota para fora.
+# Own VPC with no NAT or endpoints: tasks in a public subnet (public IP for egress only,
+# SG with no ingress from the internet) and RDS in a private subnet with no outbound route.
 
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
@@ -53,7 +53,7 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Sem rota 0.0.0.0/0: só a rota local da VPC.
+# No 0.0.0.0/0 route: only the local VPC route.
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.this.id
   tags   = { Name = "${local.name}-private" }
@@ -66,27 +66,42 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
-# --- Security groups (regras em recursos separados para evitar ciclo entre SGs) ---
+# --- Security groups (rules in separate resources to avoid cycles between SGs) ---
 
 resource "aws_security_group" "vpclink" {
   name        = "${local.name}-vpclink"
-  description = "VPC Link do API Gateway: sem entrada; sai so para o container web"
+  description = "API Gateway VPC Link: no ingress; egress only to the web container"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-vpclink" }
+
+  # Description is ForceNew; ignore it so a text change never replaces the live SG.
+  lifecycle {
+    ignore_changes = [description]
+  }
 }
 
 resource "aws_security_group" "ecs" {
   name        = "${local.name}-ecs"
-  description = "Tasks do ECS: entrada 8000 so do VPC Link"
+  description = "ECS tasks: ingress 8000 only from the VPC Link"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-ecs" }
+
+  # Description is ForceNew; ignore it so a text change never replaces the live SG.
+  lifecycle {
+    ignore_changes = [description]
+  }
 }
 
 resource "aws_security_group" "rds" {
   name        = "${local.name}-rds"
-  description = "RDS: entrada 5432 so das tasks do ECS"
+  description = "RDS: ingress 5432 only from the ECS tasks"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-rds" }
+
+  # Description is ForceNew; ignore it so a text change never replaces the live SG.
+  lifecycle {
+    ignore_changes = [description]
+  }
 }
 
 resource "aws_vpc_security_group_egress_rule" "vpclink_to_ecs" {
@@ -107,14 +122,14 @@ resource "aws_vpc_security_group_ingress_rule" "ecs_from_vpclink" {
   description                  = "API Gateway via VPC Link"
 }
 
-# 443 para qualquer destino: ECR, S3, SQS, Lambda, SSM e Logs por endpoints públicos (sem NAT/endpoints).
+# 443 to any destination: ECR, S3, SQS, Lambda, SSM and Logs through public endpoints (no NAT/endpoints).
 resource "aws_vpc_security_group_egress_rule" "ecs_https" {
   security_group_id = aws_security_group.ecs.id
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "tcp"
   from_port         = 443
   to_port           = 443
-  description       = "APIs da AWS"
+  description       = "AWS APIs"
 }
 
 resource "aws_vpc_security_group_egress_rule" "ecs_to_rds" {

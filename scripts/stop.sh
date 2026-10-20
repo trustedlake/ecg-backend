@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Desliga a produção: ECS em 0 e depois para o RDS (o disco continua cobrado).
-# A RDS volta sozinha após 7 dias parada (regra da AWS) e o Scheduler a liga no próximo dia útil.
-# Uso: scripts/desligar.sh   (AWS_PROFILE padrão: trustedlake)
+# Turns production off: ECS to 0, then stops RDS (storage is still billed).
+# RDS restarts on its own after 7 days stopped (AWS rule) and the Scheduler starts it on the next business day.
+# Usage: scripts/stop.sh   (default AWS_PROFILE: trustedlake)
 set -euo pipefail
 
 export AWS_PROFILE="${AWS_PROFILE:-trustedlake}"
@@ -24,7 +24,7 @@ echo "RDS $DB_ID: $status"
 if [ "$status" = "available" ]; then
   aws rds stop-db-instance --db-instance-identifier "$DB_ID" >/dev/null
   echo "RDS parando..."
-  # A CLI não tem waiter de "stopped": consulta a cada 30 s (até ~20 min).
+  # The CLI has no "stopped" waiter: poll every 30 s (up to ~20 min).
   for _ in $(seq 1 40); do
     status=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
       --query 'DBInstances[0].DBInstanceStatus' --output text)

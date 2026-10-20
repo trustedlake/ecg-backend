@@ -1,5 +1,5 @@
-# Entrada pública: API Gateway HTTP API (HTTPS do execute-api) → VPC Link → Cloud Map → task `web`.
-# Sem ALB/NLB e sem CloudFront. A mesma URL serve /api, /admin e o app web (export do Expo).
+# Public entry: API Gateway HTTP API (execute-api HTTPS) -> VPC Link -> Cloud Map -> `web` task.
+# No ALB/NLB and no CloudFront. The same URL serves /api, /admin and the web app (Expo export).
 
 resource "aws_apigatewayv2_api" "this" {
   name          = "ecg-backend"

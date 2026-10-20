@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Deploy do backend ECG (etapa Deploy do CodePipeline; plano §I3):
-#   1. liga o RDS se estiver parado (deploy fora do horário);
-#   2. registra uma revisão nova da task definition com a imagem IMAGE_TAG;
-#   3. migrate e ensure_admin via run-task (falha = deploy abortado, serviço intocado);
-#   4. update-service e espera estabilizar (o circuit breaker volta sozinho se as tasks não sobem);
-#   5. smoke em /api/health/ (versão nova) e / (HTML); se falhar, volta para a revisão anterior;
-#   6. se o ambiente estava desligado e estamos fora do horário, desliga de novo.
+#   1. starts RDS if it is stopped (deploy outside business hours);
+#   2. registers a new task definition revision with the IMAGE_TAG image;
+#   3. migrate and ensure_admin via run-task (failure = deploy aborted, service untouched);
+#   4. update-service and wait for it to stabilize (the circuit breaker rolls back if tasks do not start);
+#   5. smoke test on /api/health/ (new version) and / (HTML); on failure, roll back to the previous revision;
+#   6. if the environment was off and we are outside business hours, turn it off again.
 #
-# Variáveis (vêm do projeto CodeBuild, infra/aws/cicd.tf): IMAGE_TAG, ECR_REPOSITORY_URL, API_URL,
+# Variables (from the CodeBuild project, infra/aws/cicd.tf): IMAGE_TAG, ECR_REPOSITORY_URL, API_URL,
 # CLUSTER, SERVICE, TASK_FAMILY, DB_ID, LOG_GROUP, OFFICE_HOURS_ENABLED.
 set -euo pipefail
 
@@ -39,24 +39,24 @@ min_capacity=$(aws application-autoscaling describe-scalable-targets --service-n
 was_off=false
 if [ "$db_status" != "available" ] || [ "$min_capacity" = "0" ]; then
   was_off=true
-  log "Ambiente desligado (RDS: $db_status, mínimo de tasks: $min_capacity); ligando para o deploy."
+  log "Environment off (RDS: $db_status, minimum tasks: $min_capacity); starting it for the deploy."
 fi
 if [ "$db_status" = "stopped" ]; then
   aws rds start-db-instance --db-instance-identifier "$DB_ID" >/dev/null
 fi
 if [ "$db_status" != "available" ]; then
   aws rds wait db-instance-available --db-instance-identifier "$DB_ID"
-  log "RDS disponível."
+  log "RDS available."
 fi
 
-# --- 2. Nova revisão da task definition ---
+# --- 2. New task definition revision ---
 service_json=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0]')
 previous_td=$(jq -r '.taskDefinition' <<<"$service_json")
 network_config=$(jq -c '{awsvpcConfiguration: .networkConfiguration.awsvpcConfiguration}' <<<"$service_json")
 previous_image=$(aws ecs describe-task-definition --task-definition "$previous_td" \
   --query "taskDefinition.containerDefinitions[?name=='web'].image | [0]" --output text)
 
-# Base = última revisão da família: inclui mudanças do Terraform (CPU, envs) feitas depois do último deploy.
+# Base = latest revision of the family: includes Terraform changes (CPU, envs) made after the last deploy.
 aws ecs describe-task-definition --task-definition "$TASK_FAMILY" --query taskDefinition \
   | jq --arg image "$IMAGE" --arg version "$IMAGE_TAG" '
       del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities,
@@ -69,15 +69,15 @@ aws ecs describe-task-definition --task-definition "$TASK_FAMILY" --query taskDe
           else . end)' >/tmp/taskdef.json
 new_td=$(aws ecs register-task-definition --cli-input-json file:///tmp/taskdef.json \
   --query taskDefinition.taskDefinitionArn --output text)
-log "Revisão nova: $new_td (anterior: $previous_td, imagem anterior: $previous_image)"
+log "New revision: $new_td (previous: $previous_td, previous image: $previous_image)"
 
-# --- 3. migrate e ensure_admin em tasks avulsas ---
+# --- 3. migrate and ensure_admin in one-off tasks ---
 run_one_off() {
   local label="$1"; shift
   local cmd_json overrides task_arn task_id exit_code
-  # Via stdin: com --args o jq ainda lê como opção dele um argumento como "--noinput".
+  # Via stdin: with --args, jq still reads an argument like "--noinput" as its own option.
   cmd_json=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
-  # O worker é essencial: fica parado (signal.pause) até o web terminar e a task parar.
+  # The worker is essential: it stays idle (signal.pause) until web finishes and the task stops.
   overrides=$(jq -cn --argjson cmd "$cmd_json" '{containerOverrides: [
     {name: "web", command: $cmd},
     {name: "worker", command: ["python", "-c", "import signal; signal.pause()"]}]}')
@@ -94,7 +94,7 @@ run_one_off() {
   if [ "$exit_code" != "0" ]; then
     aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task_arn" \
       --query 'tasks[0].{stopCode: stopCode, reason: stoppedReason}' --output text
-    log "$label falhou (exit $exit_code). Serviço não foi alterado."
+    log "$label failed (exit $exit_code). The service was not changed."
     exit 1
   fi
   log "$label OK."
@@ -103,16 +103,16 @@ run_one_off() {
 run_one_off migrate python manage.py migrate --noinput
 run_one_off ensure_admin python manage.py ensure_admin
 
-# --- 4. Atualiza o serviço ---
+# --- 4. Update the service ---
 rollback() {
   if [[ "$previous_image" == *":bootstrap" ]]; then
-    log "Primeiro deploy: não há revisão boa anterior para voltar."
+    log "First deploy: there is no previous good revision to roll back to."
     exit 1
   fi
-  log "Voltando para $previous_td..."
+  log "Rolling back to $previous_td..."
   aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$previous_td" >/dev/null
   aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
-  log "Rollback concluído."
+  log "Rollback done."
   exit 1
 }
 
@@ -125,9 +125,9 @@ if [ "$min_capacity" = "0" ]; then
 else
   aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$new_td" >/dev/null
 fi
-log "Esperando o serviço estabilizar..."
-# services-stable pode voltar com o rollout ainda IN_PROGRESS (visto no primeiro deploy, com a revisão bootstrap ainda tentando subir);
-# espera o rollout da revisão primária terminar (até 20 min) e só então confere qual revisão ficou.
+log "Waiting for the service to stabilize..."
+# services-stable can return with the rollout still IN_PROGRESS (seen on the first deploy, with the bootstrap revision still trying to start);
+# wait for the primary revision rollout to finish (up to 20 min), then check which revision stuck.
 for _ in $(seq 1 120); do
   read -r primary_td rollout < <(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
     --query "services[0].deployments[?status=='PRIMARY'] | [0].[taskDefinition, rolloutState]" --output text)
@@ -135,11 +135,11 @@ for _ in $(seq 1 120); do
   sleep 10
 done
 if [ "$primary_td" != "$new_td" ] || [ "$rollout" != "COMPLETED" ]; then
-  log "Deploy não ficou na revisão nova (primária: $primary_td, $rollout). O circuit breaker reverteu."
+  log "Deploy did not stay on the new revision (primary: $primary_td, $rollout). The circuit breaker rolled back."
   exit 1
 fi
 
-# --- 5. Smoke pela URL pública ---
+# --- 5. Smoke test via the public URL ---
 smoke_ok=false
 for _ in $(seq 1 10); do
   version=$(curl -fsS --max-time 10 "$API_URL/api/health/" | jq -r '.version' 2>/dev/null || true)
@@ -147,22 +147,22 @@ for _ in $(seq 1 10); do
     smoke_ok=true
     break
   fi
-  log "health ainda responde versão '${version:-?}'; nova tentativa em 6 s"
+  log "health still reports version '${version:-?}'; retrying in 6 s"
   sleep 6
 done
 if $smoke_ok && curl -fsS --max-time 10 "$API_URL/" | grep -qi "<html"; then
-  log "Smoke OK: versão $IMAGE_TAG no ar em $API_URL"
+  log "Smoke OK: version $IMAGE_TAG live at $API_URL"
 else
   log "Smoke falhou."
   rollback
 fi
 
-# --- 6. Volta a desligar se o deploy foi fora do horário ---
+# --- 6. Turn off again if the deploy was outside business hours ---
 if $was_off && [ "$OFFICE_HOURS_ENABLED" = "true" ] && ! inside_office_hours; then
-  log "Fora do horário comercial: desligando de novo (ECS em 0, RDS parando)."
+  log "Outside business hours: turning off again (ECS at 0, RDS stopping)."
   aws application-autoscaling register-scalable-target --service-namespace ecs \
     --scalable-dimension ecs:service:DesiredCount --resource-id "$RESOURCE_ID" \
     --min-capacity 0 --max-capacity 0
   aws rds stop-db-instance --db-instance-identifier "$DB_ID" >/dev/null || true
 fi
-log "Deploy concluído."
+log "Deploy done."

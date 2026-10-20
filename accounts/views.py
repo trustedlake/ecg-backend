@@ -12,17 +12,17 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(trim_whitespace=False)
 
 
-INVALID_CREDENTIALS = "Usuário ou senha inválidos."
+INVALID_CREDENTIALS = "Invalid username or password."
 
 
 class LoginRateThrottle(AnonRateThrottle):
-    """Limita tentativas de login por IP (REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["login"])."""
+    """Limits login attempts per IP (REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["login"])."""
 
     scope = "login"
 
 
 class LoginView(APIView):
-    """POST /api/auth/login/ — username + senha -> {token, user}."""
+    """POST /api/auth/login/: username + password -> {token, user}."""
 
     authentication_classes = []
     permission_classes = []
@@ -35,8 +35,8 @@ class LoginView(APIView):
         username = serializer.validated_data["username"]
         password = serializer.validated_data["password"]
 
-        # Mesma mensagem (e o mesmo custo de hash) para usuário inexistente, senha errada ou
-        # usuário inativo: a resposta não revela quais usuários existem.
+        # Same message (and the same hashing cost) for an unknown user, a wrong password or
+        # an inactive user: the response does not reveal which users exist.
         user = User.objects.filter(username__iexact=username).first()
         if user is None:
             User().set_password(password)

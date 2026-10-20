@@ -19,7 +19,7 @@ output "security_group_ids" {
 }
 
 output "db_endpoint" {
-  description = "host:porta do RDS (o backend usa DB_HOST = só o host)."
+  description = "RDS host:port (the backend uses DB_HOST = host only)."
   value       = aws_db_instance.this.endpoint
 }
 
@@ -62,7 +62,7 @@ output "ecs_task_role_arn" {
 # --- I2 ---
 
 output "api_url" {
-  description = "URL pública (app web, /api e /admin)."
+  description = "Public URL (web app, /api and /admin)."
   value       = aws_apigatewayv2_stage.default.invoke_url
 }
 

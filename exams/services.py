@@ -1,16 +1,16 @@
-"""Integração Django com AWS S3 e as lambdas de ECG (tl-gmiler/ecg-lambdas-v1, CONTRATO_LAMBDAS.md).
+"""Django integration with AWS S3 and the ECG lambdas (tl-gmiler/ecg-lambdas-v1, lambda contract).
 
-Leitura: `ecg-reading`, contrato 2.0 (seis métodos; o backend fica com o `OK` de maior
-`selector_score`). Interpretação: `ecg-interpretation` (mock), que recebe como `signal` o
-`leads.json` do método escolhido. Os cenários de teste são o campo `mock` do payload.
+Reading: `ecg-reading`, contract 2.0 (six methods; the backend keeps the `OK` one with the highest
+`selector_score`). Interpretation: `ecg-interpretation` (mock), which receives as `signal` the
+`leads.json` of the chosen method. Test scenarios are the `mock` field of the payload.
 
-- `invoke_contract` sempre devolve um envelope do contrato (falha de infraestrutura vira
-  um envelope sintético `ERROR`/`INTERNAL_ERROR` retryable, nunca exceção).
-- `run_reading` / `run_interpretation` executam uma fase e gravam o desfecho na tentativa
-  (estados de docs/fluxo-usuario-v1.md §3). São síncronas: quem decide se rodam inline ou
-  no worker é `exams/tasks.py` (etapa B3).
-- `attempt_reading_view` / `attempt_interpretation_view` / `attempt_flags` montam os blocos
-  do objeto `Attempt` da API (plano §0.1); presigned URLs são geradas na hora, nunca gravadas.
+- `invoke_contract` always returns a contract envelope (an infrastructure failure becomes
+  a synthetic retryable `ERROR`/`INTERNAL_ERROR` envelope, never an exception).
+- `run_reading` / `run_interpretation` run one phase and store the outcome on the attempt
+  (states in docs/user-flow-v1.md §3). They are synchronous: whether they run inline or
+  in the worker is decided by `exams/tasks.py` (step B3).
+- `attempt_reading_view` / `attempt_interpretation_view` / `attempt_flags` build the blocks
+  of the API `Attempt` object (plan §0.1); presigned URLs are generated on the fly, never stored.
 """
 
 import json
@@ -39,19 +39,19 @@ READ_STATUSES = (STATUS_OK, STATUS_OK_WITH_WARNINGS, STATUS_REFUSED, STATUS_ERRO
 INTERPRET_STATUSES = (STATUS_OK, STATUS_OK_WITH_WARNINGS, STATUS_ERROR)
 METHOD_OK = "OK"
 
-# Erros que o próprio backend gera (sem resposta válida da lambda). Mesmos códigos do catálogo.
+# Errors the backend itself generates (no valid lambda response). Same codes as the catalog.
 LOCAL_ERRORS = {
-    "INTERNAL_ERROR": ("internal", True, "Não foi possível concluir o processamento agora. Tente de novo em instantes."),
-    "STORAGE_ERROR": ("internal", True, "Falha ao ler os artefatos da leitura. Tente de novo em instantes."),
-    "SEX_MISSING": ("validation", False, "Informe o sexo do paciente para interpretar o ECG."),
-    "TASK_TIMEOUT": ("internal", True, "O processamento demorou mais que o esperado. Tente de novo."),
+    "INTERNAL_ERROR": ("internal", True, "Processing could not be completed right now. Try again in a moment."),
+    "STORAGE_ERROR": ("internal", True, "Failed to read the reading artifacts. Try again in a moment."),
+    "SEX_MISSING": ("validation", False, "Enter the patient's sex to interpret the ECG."),
+    "TASK_TIMEOUT": ("internal", True, "Processing took longer than expected. Try again."),
 }
 
-# Aviso que o backend acrescenta quando a lambda diz OK_WITH_WARNINGS sem aviso no método escolhido
-# (no contrato 2.0 isso significa que algum dos seis métodos não concluiu).
+# Warning the backend adds when the lambda says OK_WITH_WARNINGS with no warning on the chosen method
+# (in contract 2.0 this means one of the six methods did not finish).
 METHODS_PARTIAL_WARNING = {
     "code": "METHODS_PARTIAL_RESULT",
-    "message": "Nem todos os métodos de leitura concluíram; o traçado mostrado é o do método mais confiável.",
+    "message": "Not all reading methods finished; the trace shown is from the most reliable method.",
 }
 
 LOG_BODY_LIMIT = 2000
@@ -70,8 +70,8 @@ def _session():
 
 
 def _lambda_client():
-    # Espera a lambda terminar (até AWS_LAMBDA_READ_TIMEOUT) e nunca reinvoca sozinho:
-    # quem decide repetir é o usuário (retry) ou a fila.
+    # Waits for the lambda to finish (up to AWS_LAMBDA_READ_TIMEOUT) and never re-invokes on its own:
+    # retrying is up to the user (retry) or the queue.
     return _session().client(
         "lambda",
         config=Config(
@@ -83,15 +83,15 @@ def _lambda_client():
 
 
 def _s3_client():
-    """Client S3 forçado a SigV4 para presigned URLs (SigV2 deprecated by AWS)."""
+    """S3 client forced to SigV4 for presigned URLs (SigV2 deprecated by AWS)."""
     return _session().client("s3", config=Config(signature_version="s3v4"))
 
 
 def presign_put_url(bucket, key, expires_in, content_type=None):
-    """Presigned PUT direto do frontend pro S3 (upload nunca passa no Django).
+    """Presigned PUT straight from the frontend to S3 (the upload never goes through Django).
 
-    Se content_type for informado, ele é ASSINADO na URL: o cliente DEVE enviar
-    o mesmo valor no header Content-Type, senão a assinatura falha (403).
+    If content_type is given, it is SIGNED into the URL: the client MUST send
+    the same value in the Content-Type header, otherwise the signature fails (403).
     """
     params = {"Bucket": bucket, "Key": key}
     if content_type:
@@ -102,7 +102,7 @@ def presign_put_url(bucket, key, expires_in, content_type=None):
 
 
 def presign_get_url(bucket, key, expires_in):
-    """Presigned GET sob demanda — URLs nunca são persistidas no banco."""
+    """On-demand presigned GET: URLs are never stored in the database."""
     return _s3_client().generate_presigned_url(
         "get_object",
         Params={"Bucket": bucket, "Key": key},
@@ -111,9 +111,9 @@ def presign_get_url(bucket, key, expires_in):
 
 
 def original_image_url(attempt, expires_in):
-    if not attempt.imagem_s3_key:
+    if not attempt.image_s3_key:
         return None
-    return presign_get_url(settings.AWS_IMAGES_BUCKET, attempt.imagem_s3_key, expires_in)
+    return presign_get_url(settings.AWS_IMAGES_BUCKET, attempt.image_s3_key, expires_in)
 
 
 def _read_json_from_s3(bucket, key):
@@ -154,24 +154,24 @@ def _is_number(value):
 
 
 def _envelope_problem(body, operation, request_id):
-    """Devolve o motivo de o envelope ser inválido, ou None se ele seguir o contrato §1.1."""
+    """Returns why the envelope is invalid, or None if it follows contract §1.1."""
     if not isinstance(body, dict):
-        return "corpo não é objeto"
+        return "body is not an object"
     allowed = READ_STATUSES if operation == "read" else INTERPRET_STATUSES
     status = body.get("status")
     if status not in allowed:
-        return f"status inválido: {status!r}"
+        return f"invalid status: {status!r}"
     if body.get("request_id") not in (None, request_id):
-        return "request_id diferente do enviado"
+        return "request_id differs from the one sent"
     warnings = body.get("warnings", [])
     if not isinstance(warnings, list) or not all(
         isinstance(w, dict) and _is_str(w.get("code")) and isinstance(w.get("message"), str)
         for w in warnings
     ):
-        return "warnings inválido"
+        return "invalid warnings"
     if status in SUCCESS_STATUSES:
         if not isinstance(body.get("result"), dict):
-            return "result ausente em status de sucesso"
+            return "result missing on a success status"
     else:
         error = body.get("error")
         if not (
@@ -181,15 +181,15 @@ def _envelope_problem(body, operation, request_id):
             and isinstance(error.get("retryable"), bool)
             and isinstance(error.get("message"), str)
         ):
-            return "error ausente ou incompleto"
+            return "error missing or incomplete"
     return None
 
 
 def invoke_contract(function_name, payload, operation=None):
-    """Invoca a lambda (RequestResponse) e devolve SEMPRE um envelope do contrato v1.
+    """Invokes the lambda (RequestResponse) and ALWAYS returns a contract v1 envelope.
 
-    FunctionError (timeout/OOM/exceção), erro do boto3/rede ou envelope fora do contrato viram
-    um envelope sintético `ERROR` / `INTERNAL_ERROR` com `retryable: true`.
+    FunctionError (timeout/OOM/exception), a boto3/network error or an off-contract envelope become
+    a synthetic `ERROR` / `INTERNAL_ERROR` envelope with `retryable: true`.
     """
     operation = operation or ("interpret" if "signal" in payload else "read")
     request_id = payload.get("request_id")
@@ -200,8 +200,8 @@ def invoke_contract(function_name, payload, operation=None):
             Payload=json.dumps(payload),
         )
         raw = response["Payload"].read()
-    except Exception:  # timeout de leitura, ClientError, conexão, credenciais
-        logger.exception("Falha ao invocar a lambda %s (request_id=%s)", function_name, request_id)
+    except Exception:  # read timeout, ClientError, connection, credentials
+        logger.exception("Failed to invoke lambda %s (request_id=%s)", function_name, request_id)
         return _synthetic_envelope(operation, request_id, "INTERNAL_ERROR")
 
     text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
@@ -219,7 +219,7 @@ def invoke_contract(function_name, payload, operation=None):
     problem = _envelope_problem(body, operation, request_id)
     if problem:
         logger.error(
-            "Lambda %s devolveu envelope fora do contrato (%s, request_id=%s): %s",
+            "Lambda %s returned an off-contract envelope (%s, request_id=%s): %s",
             function_name, problem, request_id, text[:LOG_BODY_LIMIT],
         )
         return _synthetic_envelope(operation, request_id, "INTERNAL_ERROR")
@@ -228,15 +228,15 @@ def invoke_contract(function_name, payload, operation=None):
 
 
 def _public_error(error):
-    """Só os campos do erro que a API expõe (details fica de fora; ex.: chaves S3)."""
+    """Only the error fields the API exposes (details is left out, e.g. S3 keys)."""
     if not error:
         return None
     return {k: error[k] for k in ("code", "category", "retryable", "message")}
 
 
 def _public_warnings(warnings):
-    """Avisos {code, message, lead?} sem repetição; itens fora do formato são descartados
-    (os avisos por método do contrato 2.0 não passam pela validação do envelope)."""
+    """Warnings {code, message, lead?} without duplicates; malformed items are dropped
+    (contract 2.0 per-method warnings do not go through envelope validation)."""
     out, seen = [], set()
     for w in warnings if isinstance(warnings, list) else []:
         if not (isinstance(w, dict) and _is_str(w.get("code")) and isinstance(w.get("message"), str)):
@@ -255,12 +255,12 @@ def _public_warnings(warnings):
 
 
 def _finish(attempt, phase, status, **fields):
-    """Grava o desfecho da fase só se a tentativa ainda estiver no `*_processando` dela (CAS).
+    """Stores the phase outcome only if the attempt is still in that phase's processing state (CAS).
 
-    Um resultado atrasado/duplicado (ex.: depois de um TASK_TIMEOUT) não sobrescreve outro estado."""
+    A late/duplicate result (e.g. after a TASK_TIMEOUT) does not overwrite another state."""
     done = transition(attempt, PHASES[phase][0], status, **fields)
     if not done:
-        logger.warning("Desfecho %s da fase %s descartado: tentativa %s já está em %s",
+        logger.warning("Outcome %s of phase %s dropped: attempt %s is already in %s",
                        status, phase, attempt.id, attempt.status)
     return done
 
@@ -275,10 +275,10 @@ def _mirror_exam(attempt_id, exam_id, status, now):
 
 
 def transition(attempt, from_statuses, to_status, updated_before=None, **fields):
-    """Compare-and-swap: muda o status só se a tentativa ainda estiver em `from_statuses`.
+    """Compare-and-swap: changes the status only if the attempt is still in `from_statuses`.
 
-    Dois toques simultâneos (ou dois eventos da fila) não passam os dois. Espelha no exame se a
-    tentativa for a mais recente. Devolve True se esta chamada fez a transição; atualiza `attempt`.
+    Two simultaneous taps (or two queue events) do not both get through. Mirrors to the exam if the
+    attempt is the latest. Returns True if this call made the transition; updates `attempt`.
     """
     if isinstance(from_statuses, str):
         from_statuses = (from_statuses,)
@@ -294,17 +294,17 @@ def transition(attempt, from_statuses, to_status, updated_before=None, **fields)
     return bool(updated)
 
 
-# Fase → (estado em processamento, estado de erro, campo JSON do bloco da fase).
+# Phase -> (processing state, error state, JSON field of the phase block).
 PHASES = {
-    "read": (ExamStatus.LEITURA_PROCESSANDO, ExamStatus.ERRO_LEITURA, "reading"),
-    "interpret": (ExamStatus.INTERPRETACAO_PROCESSANDO, ExamStatus.ERRO_INTERPRETACAO, "interpretation"),
+    "read": (ExamStatus.READING, ExamStatus.READING_ERROR, "reading"),
+    "interpret": (ExamStatus.INTERPRETING, ExamStatus.INTERPRETATION_ERROR, "interpretation"),
 }
 
 
 def fail_phase(attempt, phase, code, details=None, updated_before=None):
-    """Marca a fase em processamento como erro local (`INTERNAL_ERROR`, `TASK_TIMEOUT`…), via CAS.
+    """Marks the processing phase as a local error (`INTERNAL_ERROR`, `TASK_TIMEOUT`...), via CAS.
 
-    Na interpretação a leitura é preservada (o retry reaproveita o sinal)."""
+    For interpretation the reading is kept (the retry reuses the signal)."""
     processing, error_status, field = PHASES[phase]
     synthetic = _synthetic_envelope(phase, str(attempt.id), code, details)
     if phase == "read":
@@ -316,19 +316,19 @@ def fail_phase(attempt, phase, code, details=None, updated_before=None):
 
 
 def recover_stale(attempt):
-    """Tentativa presa em `*_processando` além de STALE_PROCESSING_SECONDS vira `erro_*` com
-    `TASK_TIMEOUT` (retryable). Ex.: o worker reiniciou no meio da chamada. Devolve a tentativa."""
+    """An attempt stuck in a processing state beyond STALE_PROCESSING_SECONDS becomes an error state with
+    `TASK_TIMEOUT` (retryable), e.g. the worker restarted mid-call. Returns the attempt."""
     for phase, (processing, _, _) in PHASES.items():
         if attempt.status != processing:
             continue
         limit = timezone.now() - timedelta(seconds=settings.STALE_PROCESSING_SECONDS)
         if attempt.updated_at <= limit and fail_phase(attempt, phase, "TASK_TIMEOUT", updated_before=limit):
-            logger.warning("Tentativa %s presa em %s; marcada como TASK_TIMEOUT", attempt.id, processing)
+            logger.warning("Attempt %s stuck in %s; marked as TASK_TIMEOUT", attempt.id, processing)
     return attempt
 
 
 def _artifact(ref, request_id):
-    """Valida um artefato {bucket, key} do contrato §3: bucket de resultados e prefixo da tentativa."""
+    """Validates a contract §3 artifact {bucket, key}: results bucket and attempt prefix."""
     if not isinstance(ref, dict):
         return None
     bucket, key = ref.get("bucket"), ref.get("key")
@@ -363,7 +363,7 @@ def _empty_reading(envelope):
 
 
 def _reading_error(envelope, code, request_id, reason):
-    logger.error("Leitura %s inválida: %s", request_id, reason)
+    logger.error("Invalid reading %s: %s", request_id, reason)
     synthetic = _synthetic_envelope("read", request_id, code)
     reading = _empty_reading(synthetic)
     reading["meta"] = envelope.get("meta") or synthetic["meta"]
@@ -371,18 +371,18 @@ def _reading_error(envelope, code, request_id, reason):
     return reading
 
 
-# --------------------------------------------------------------------------- leitura
+# --------------------------------------------------------------------------- reading
 
 
 def build_reading_payload(attempt):
     payload = {
         "contract_version": CONTRACT_VERSION,
         "request_id": str(attempt.id),
-        "image": {"bucket": settings.AWS_IMAGES_BUCKET, "key": attempt.imagem_s3_key},
+        "image": {"bucket": settings.AWS_IMAGES_BUCKET, "key": attempt.image_s3_key},
         "layout": attempt.layout,
     }
-    if attempt.calibracao:
-        payload["calibration"] = attempt.calibracao
+    if attempt.calibration:
+        payload["calibration"] = attempt.calibration
     mock = (attempt.test_scenario or {}).get("read")
     if mock:
         payload["mock"] = mock
@@ -390,7 +390,7 @@ def build_reading_payload(attempt):
 
 
 def _methods_summary(methods):
-    """Resumo dos seis métodos (auditoria; não vai para a API)."""
+    """Summary of the six methods (audit only; not sent to the API)."""
     return [
         {k: m.get(k) for k in ("method", "version", "status", "reason", "selector_score")}
         for m in methods if isinstance(m, dict)
@@ -398,9 +398,9 @@ def _methods_summary(methods):
 
 
 def _choose_method(methods, request_id):
-    """Método `OK` de maior `selector_score` com `files.leads` e `files.image` válidos (contrato §3).
+    """The `OK` method with the highest `selector_score` and valid `files.leads` and `files.image` (contract §3).
 
-    Devolve (método, ref do leads.json, ref da imagem) ou None."""
+    Returns (method, leads.json ref, image ref) or None."""
     best = None
     for method in methods:
         if not isinstance(method, dict) or method.get("status") != METHOD_OK:
@@ -417,7 +417,7 @@ def _choose_method(methods, request_id):
 
 
 def _refusal_preview(details, request_id):
-    """Prévia da recusa: `details.preview` (formato antigo) ou a imagem de recusa do primeiro método."""
+    """Refusal preview: `details.preview` (old format) or the refusal image of the first method."""
     preview = _artifact(details.get("preview"), request_id)
     if preview:
         return preview
@@ -430,30 +430,30 @@ def _refusal_preview(details, request_id):
 
 
 def _read_success(envelope, reading, request_id):
-    """Preenche `reading` a partir de uma leitura OK/OK_WITH_WARNINGS; devolve o bloco de erro
-    sintético se a resposta não for aproveitável."""
+    """Fills `reading` from an OK/OK_WITH_WARNINGS reading; returns the synthetic error block
+    if the response is unusable."""
     methods = envelope["result"].get("methods")
     if not isinstance(methods, list):
         return _reading_error(envelope, "INTERNAL_ERROR", request_id, "result.methods ausente")
     chosen = _choose_method(methods, request_id)
     if chosen is None:
         return _reading_error(envelope, "INTERNAL_ERROR", request_id,
-                              f"nenhum método OK aproveitável: {_methods_summary(methods)!r}"[:LOG_BODY_LIMIT])
+                              f"no usable OK method: {_methods_summary(methods)!r}"[:LOG_BODY_LIMIT])
     method, leads_ref, image_ref = chosen
     try:
         leads_doc = _read_json_from_s3(leads_ref["bucket"], leads_ref["key"])
         leads = leads_doc.get("leads") if isinstance(leads_doc, dict) else None
         if not isinstance(leads, list) or not all(isinstance(lead, dict) for lead in leads):
-            raise ValueError("leads.json sem lista de derivações")
+            raise ValueError("leads.json has no lead list")
     except Exception:
-        logger.exception("Falha ao ler o leads.json %s da leitura %s", leads_ref, request_id)
-        return _reading_error(envelope, "STORAGE_ERROR", request_id, "leads.json ilegível")
+        logger.exception("Failed to read leads.json %s of reading %s", leads_ref, request_id)
+        return _reading_error(envelope, "STORAGE_ERROR", request_id, "unreadable leads.json")
 
     warnings = _public_warnings((envelope.get("warnings") or []) + (method.get("warnings") or []))
     if envelope["status"] == STATUS_OK_WITH_WARNINGS and not warnings:
         warnings = [dict(METHODS_PARTIAL_WARNING)]
     reading["warnings"] = warnings
-    # Resumo por derivação SEM `samples`: o sinal fica só no S3 (artifacts.signal).
+    # Per-lead summary WITHOUT `samples`: the signal stays only in S3 (artifacts.signal).
     reading["leads"] = [{k: lead.get(k) for k in ("name", "kind", "quality", "coverage")} for lead in leads]
     reading["artifacts"]["overlay"] = image_ref
     reading["artifacts"]["signal"] = leads_ref
@@ -468,8 +468,8 @@ def _read_success(envelope, reading, request_id):
 
 
 def run_reading(attempt):
-    """Fase de leitura (contrato 2.0). Grava `attempt.reading` e move para
-    aguardando_validacao / leitura_recusada / erro_leitura. Devolve o status final."""
+    """Reading phase (contract 2.0). Stores `attempt.reading` and moves to
+    awaiting_validation / reading_refused / reading_error. Devolve o status final."""
     request_id = str(attempt.id)
     envelope = invoke_contract(settings.AWS_LAMBDA_ECG_READING, build_reading_payload(attempt), "read")
     status = envelope["status"]
@@ -478,18 +478,18 @@ def run_reading(attempt):
     if status in SUCCESS_STATUSES:
         reading = _read_success(envelope, reading, request_id)
         if reading["error"] is None:
-            _finish(attempt, "read", ExamStatus.AGUARDANDO_VALIDACAO, reading=reading)
+            _finish(attempt, "read", ExamStatus.AWAITING_VALIDATION, reading=reading)
             return attempt.status
 
     elif status == STATUS_REFUSED:
         error = envelope["error"]
         details = error.get("details") if isinstance(error.get("details"), dict) else {}
         reading["error"] = _public_error(error)
-        # A prévia é opcional; fora do bucket/prefixo da tentativa ela é descartada.
+        # The preview is optional; outside the attempt's bucket/prefix it is dropped.
         reading["artifacts"]["refusal_preview"] = _refusal_preview(details, request_id)
         reading["refusal_region_px"] = _region_px(details.get("region_px"))
         reading["methods"] = _methods_summary(details.get("methods"))
-        _finish(attempt, "read", ExamStatus.LEITURA_RECUSADA, reading=reading)
+        _finish(attempt, "read", ExamStatus.READING_REFUSED, reading=reading)
         return attempt.status
 
     else:
@@ -498,11 +498,11 @@ def run_reading(attempt):
         reading["error"] = _public_error(error)
         reading["methods"] = _methods_summary(details.get("methods"))
 
-    _finish(attempt, "read", ExamStatus.ERRO_LEITURA, reading=reading)
+    _finish(attempt, "read", ExamStatus.READING_ERROR, reading=reading)
     return attempt.status
 
 
-# --------------------------------------------------------------------------- interpretação
+# --------------------------------------------------------------------------- interpretation
 
 
 def _interpretation_record(envelope):
@@ -515,15 +515,15 @@ def _interpretation_record(envelope):
 
 
 def run_interpretation(attempt):
-    """Fase de interpretação (contrato §3). Só a partir de uma leitura OK/OK_WITH_WARNINGS.
+    """Interpretation phase (contract §3). Only from an OK/OK_WITH_WARNINGS reading.
 
-    Grava `attempt.interpretation` (+ `Report` no sucesso) e move para concluido /
-    erro_interpretacao. Devolve o status final.
+    Stores `attempt.interpretation` (+ `Report` on success) and moves to completed /
+    interpretation_error. Devolve o status final.
     """
     reading = attempt.reading or {}
     signal_ref = (reading.get("artifacts") or {}).get("signal")
     if reading.get("status") not in SUCCESS_STATUSES or not signal_ref:
-        raise ValueError(f"Tentativa {attempt.id} sem leitura bem-sucedida para interpretar.")
+        raise ValueError(f"Attempt {attempt.id} has no successful reading to interpret.")
 
     request_id = str(attempt.id)
     sex = attempt.exam.patient.sex
@@ -533,12 +533,12 @@ def run_interpretation(attempt):
         try:
             leads_doc = _read_json_from_s3(signal_ref["bucket"], signal_ref["key"])
             if not isinstance(leads_doc, dict):
-                raise ValueError("leads.json não é objeto")
-            # O leads.json do contrato 2.0 não traz a taxa: ela vem do método escolhido (contrato §4).
+                raise ValueError("leads.json is not an object")
+            # The contract 2.0 leads.json has no sample rate: it comes from the chosen method (contract §4).
             signal = {"sampling_rate_hz": (reading.get("method") or {}).get("sampling_rate_hz"),
                       "units": "mV", **leads_doc}
         except Exception:
-            logger.exception("Falha ao baixar o sinal %s da tentativa %s", signal_ref, request_id)
+            logger.exception("Failed to download signal %s of attempt %s", signal_ref, request_id)
             envelope = _synthetic_envelope("interpret", request_id, "STORAGE_ERROR")
         else:
             payload = {
@@ -556,14 +556,14 @@ def run_interpretation(attempt):
         result = envelope["result"]
         summary = result.get("summary")
         if not isinstance(summary, dict):
-            logger.error("Interpretação %s sem summary: %s", request_id, str(result)[:LOG_BODY_LIMIT])
+            logger.error("Interpretation %s has no summary: %s", request_id, str(result)[:LOG_BODY_LIMIT])
             envelope = _synthetic_envelope("interpret", request_id, "INTERNAL_ERROR")
         else:
             record = _interpretation_record(envelope)
             meta = record["meta"]
             classification = summary.get("classification")
             with transaction.atomic():
-                if not _finish(attempt, "interpret", ExamStatus.CONCLUIDO, interpretation=record):
+                if not _finish(attempt, "interpret", ExamStatus.COMPLETED, interpretation=record):
                     return attempt.status
                 Report.objects.update_or_create(
                     attempt=attempt,
@@ -579,11 +579,11 @@ def run_interpretation(attempt):
                 )
             return attempt.status
 
-    _finish(attempt, "interpret", ExamStatus.ERRO_INTERPRETACAO, interpretation=_interpretation_record(envelope))
+    _finish(attempt, "interpret", ExamStatus.INTERPRETATION_ERROR, interpretation=_interpretation_record(envelope))
     return attempt.status
 
 
-# --------------------------------------------------------------------------- leitura para a API
+# --------------------------------------------------------------------------- API views
 
 
 def _presign_artifact(ref, expires_in):
@@ -593,7 +593,7 @@ def _presign_artifact(ref, expires_in):
 
 
 def attempt_reading_view(attempt, expires_in=None):
-    """Bloco `reading` do objeto `Attempt` (plano §0.1), ou None se a leitura não rodou."""
+    """`reading` block of the `Attempt` object (plan §0.1), or None if the reading did not run."""
     reading = attempt.reading
     if not reading:
         return None
@@ -611,7 +611,7 @@ def attempt_reading_view(attempt, expires_in=None):
 
 
 def attempt_interpretation_view(attempt):
-    """Bloco `interpretation` do objeto `Attempt` (plano §0.1), ou None se não rodou."""
+    """`interpretation` block of the `Attempt` object (plan §0.1), or None if it did not run."""
     record = attempt.interpretation
     if not record:
         return None
@@ -625,7 +625,7 @@ def attempt_interpretation_view(attempt):
     }
     if record.get("status") in SUCCESS_STATUSES:
         try:
-            report = attempt.report  # aproveita select_related/prefetch_related da view
+            report = attempt.report  # reuses the view's select_related/prefetch_related
         except Report.DoesNotExist:
             report = None
         if report is not None:
@@ -636,22 +636,22 @@ def attempt_interpretation_view(attempt):
 
 
 def phase_error(attempt):
-    """Erro da fase que falhou (`erro_leitura` → reading, `erro_interpretacao` → interpretation)."""
-    if attempt.status == ExamStatus.ERRO_LEITURA:
+    """Error of the failed phase (`reading_error` -> reading, `interpretation_error` -> interpretation)."""
+    if attempt.status == ExamStatus.READING_ERROR:
         return (attempt.reading or {}).get("error")
-    if attempt.status == ExamStatus.ERRO_INTERPRETACAO:
+    if attempt.status == ExamStatus.INTERPRETATION_ERROR:
         return (attempt.interpretation or {}).get("error")
     return None
 
 
 def attempt_flags(attempt):
-    """`can_retry` / `needs_new_photo` do fluxo §3."""
+    """`can_retry` / `needs_new_photo` from flow §3."""
     status = attempt.status
-    if status in (ExamStatus.ERRO_LEITURA, ExamStatus.ERRO_INTERPRETACAO):
+    if status in (ExamStatus.READING_ERROR, ExamStatus.INTERPRETATION_ERROR):
         error = phase_error(attempt) or {}
-        # Sem erro registrado (não deveria acontecer) vale tentar de novo.
+        # No recorded error (should not happen): allow a retry.
         retryable = error.get("retryable", True) is True
         return {"can_retry": retryable, "needs_new_photo": not retryable}
-    if status in (ExamStatus.LEITURA_RECUSADA, ExamStatus.REJEITADO_USUARIO):
+    if status in (ExamStatus.READING_REFUSED, ExamStatus.USER_REJECTED):
         return {"can_retry": False, "needs_new_photo": True}
     return {"can_retry": False, "needs_new_photo": False}

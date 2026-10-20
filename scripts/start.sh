@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Liga a produção fora do horário comercial: RDS e depois o ECS (min 1 / max 2).
-# Vale até a próxima ação agendada (às 20:00 de dia útil o ECS volta a 0).
-# Uso: scripts/ligar.sh   (AWS_PROFILE padrão: trustedlake)
+# Turns production on outside business hours: RDS, then ECS (min 1 / max 2).
+# Lasts until the next scheduled action (at 20:00 on business days ECS goes back to 0).
+# Usage: scripts/start.sh   (default AWS_PROFILE: trustedlake)
 set -euo pipefail
 
 export AWS_PROFILE="${AWS_PROFILE:-trustedlake}"
@@ -20,13 +20,13 @@ fi
 if [ "$status" != "available" ]; then
   aws rds wait db-instance-available --db-instance-identifier "$DB_ID"
 fi
-echo "RDS disponível."
+echo "RDS available."
 
 aws application-autoscaling register-scalable-target \
   --service-namespace ecs \
   --scalable-dimension ecs:service:DesiredCount \
   --resource-id "service/$CLUSTER/$SERVICE" \
   --min-capacity 1 --max-capacity 2
-echo "ECS: min 1 / max 2. Esperando o serviço estabilizar..."
+echo "ECS: min 1 / max 2. Waiting for the service to stabilize..."
 aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
 echo "Ligado."

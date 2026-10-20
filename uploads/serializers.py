@@ -17,8 +17,8 @@ def _ext_from(filename, content_type):
 
 
 class UploadFileRequestSerializer(serializers.Serializer):
-    """Um item da lista enviada em POST /api/uploads/: metadados do arquivo
-    que o frontend quer subir (o binário vai depois, direto pro S3 via
+    """One item of the list sent to POST /api/uploads/: metadata of the file
+    the frontend wants to upload (the binary goes later, straight to S3 via
     presigned PUT)."""
 
     filename = serializers.CharField(required=False, allow_blank=True, default="")
@@ -28,7 +28,7 @@ class UploadFileRequestSerializer(serializers.Serializer):
         ext = _ext_from(attrs.get("filename", ""), attrs.get("content_type", ""))
         if ext not in VALID_IMAGE_EXTS:
             raise serializers.ValidationError(
-                {"filename": f"Extensão de imagem não suportada: '{ext}'."}
+                {"filename": f"Unsupported image extension: '{ext}'."}
             )
         attrs["_ext"] = ext
         return attrs
@@ -39,5 +39,5 @@ class UploadBatchCreateSerializer(serializers.Serializer):
 
     def validate_files(self, value):
         if not value:
-            raise serializers.ValidationError("Envie ao menos um arquivo.")
+            raise serializers.ValidationError("Send at least one file.")
         return value

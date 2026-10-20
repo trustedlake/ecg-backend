@@ -6,7 +6,7 @@ terraform {
     }
   }
 
-  # Reusa o bucket de state do ecg-lambdas, em key propria - nao toca o state dele.
+  # Reuses the ecg-lambdas state bucket, under its own key; does not touch that state.
   backend "s3" {
     bucket = "ecg-lambdas-terraform-state"
     key    = "ecg-backend/terraform.tfstate"
@@ -22,12 +22,12 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-# AMI: Amazon Linux 2023 arm64 (Graviton) - nunca hardcodar ID de AMI.
+# AMI: Amazon Linux 2023 arm64 (Graviton); never hardcode an AMI ID.
 data "aws_ssm_parameter" "al2023_arm64" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
 }
 
-# VPC e subnet default (decisao: manter simples, sem rede nova).
+# Default VPC and subnet (decision: keep it simple, no new network).
 data "aws_vpc" "default" {
   default = true
 }
@@ -63,11 +63,11 @@ locals {
 }
 
 # ---------- Key pair ----------
-# A chave privada NUNCA passa pelo Terraform (isso gravaria em texto claro no
-# tfstate). O par e gerado localmente antes do apply:
+# The private key NEVER goes through Terraform (that would store it in plain text in the
+# tfstate). The pair is generated locally before the apply:
 #   ssh-keygen -t ed25519 -f infra/keys/ecg-backend -N ""
-# e o aws_key_pair so registra a chave PUBLICA existente em infra/key.
-# Se var.key_name vier preenchido, reaproveita um key pair AWS existente.
+# and aws_key_pair only registers the existing PUBLIC key in infra/key.
+# If var.key_name is set, an existing AWS key pair is reused.
 resource "aws_key_pair" "ecg_backend" {
   count      = var.key_name == "" ? 1 : 0
   key_name   = "${local.app_name}-deploy"
@@ -77,11 +77,16 @@ resource "aws_key_pair" "ecg_backend" {
 # ---------- Security Group ----------
 resource "aws_security_group" "ecg_backend" {
   name        = "${local.app_name}-sg"
-  description = "API publica (8000) + SSH restrito (22) para ${local.app_name}"
+  description = "Public API (8000) + restricted SSH (22) for ${local.app_name}"
   vpc_id      = data.aws_vpc.default.id
 
+  # Description is ForceNew; ignore text changes so they never replace the live SG.
+  lifecycle {
+    ignore_changes = [description, ingress]
+  }
+
   ingress {
-    description = "API HTTP - Gunicorn (sem nginx/ALB)"
+    description = "HTTP API - Gunicorn (no nginx/ALB)"
     from_port   = 8000
     to_port     = 8000
     protocol    = "tcp"
@@ -105,7 +110,7 @@ resource "aws_security_group" "ecg_backend" {
   }
 }
 
-# ---------- IAM (role EC2, sem access keys) ----------
+# ---------- IAM (EC2 role, no access keys) ----------
 resource "aws_iam_role" "ecg_backend" {
   name = "${local.app_name}-ec2-role"
   assume_role_policy = jsonencode({
@@ -161,12 +166,12 @@ resource "aws_iam_role_policy" "ecg_backend" {
   })
 }
 
-# ---------- SSM Parameter Store (SecureString, valor placeholder) ----------
+# ---------- SSM Parameter Store (SecureString, placeholder value) ----------
 resource "aws_ssm_parameter" "database_url" {
   name = local.ssm_db_url
   type = "SecureString"
   # Placeholder - preenchido a mao via aws ssm put-parameter --overwrite
-  # (nunca vai pro terraform nem pro git).
+  # (never goes into terraform or git).
   value = "CHANGE_ME_DATABASE_URL"
   lifecycle {
     ignore_changes = [value]
@@ -204,16 +209,16 @@ resource "aws_instance" "ecg_backend" {
   }
 }
 
-# ---------- Elastic IP (IP público fixo) ----------
+# ---------- Elastic IP (fixed public IP) ----------
 resource "aws_eip" "ecg_backend" {
   instance = aws_instance.ecg_backend.id
   domain   = "vpc"
 }
 
-# ---------- CloudFront (HTTPS na frente da EC2) ----------
+# ---------- CloudFront (HTTPS in front of the EC2) ----------
 resource "aws_cloudfront_distribution" "ecg_backend" {
   enabled = true
-  comment = "HTTPS proxy para ecg-backend (EC2 sem TLS nativo)"
+  comment = "HTTPS proxy for ecg-backend (EC2 without native TLS)"
   price_class = "PriceClass_100"
 
   origin {

@@ -2,7 +2,7 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-    """Remove os campos do pipeline ecg-analyser (refine e fidelidade saíram da V1)."""
+    """Remove the legacy ecg-analyser pipeline fields (refine and fidelity were dropped from V1)."""
 
     dependencies = [
         ("exams", "0003_contract_v1_data"),

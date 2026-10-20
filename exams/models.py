@@ -5,27 +5,27 @@ from django.db import models
 
 
 class ExamStatus(models.TextChoices):
-    """Estados da tentativa (docs/fluxo-usuario-v1.md §3). O Exam espelha a mais recente."""
+    """Attempt states (docs/user-flow-v1.md §3). The Exam mirrors the latest one."""
 
-    CRIADO = "criado", "Criado"
-    LEITURA_PROCESSANDO = "leitura_processando", "Leitura processando"
-    AGUARDANDO_VALIDACAO = "aguardando_validacao", "Aguardando validação"
-    LEITURA_RECUSADA = "leitura_recusada", "Leitura recusada"
-    ERRO_LEITURA = "erro_leitura", "Erro na leitura"
-    REJEITADO_USUARIO = "rejeitado_usuario", "Rejeitado pelo usuário"
-    INTERPRETACAO_PROCESSANDO = "interpretacao_processando", "Interpretação processando"
-    CONCLUIDO = "concluido", "Concluído"
-    ERRO_INTERPRETACAO = "erro_interpretacao", "Erro na interpretação"
+    CREATED = "created", "Created"
+    READING = "reading", "Reading"
+    AWAITING_VALIDATION = "awaiting_validation", "Awaiting validation"
+    READING_REFUSED = "reading_refused", "Reading refused"
+    READING_ERROR = "reading_error", "Reading error"
+    USER_REJECTED = "user_rejected", "Rejected by user"
+    INTERPRETING = "interpreting", "Interpreting"
+    COMPLETED = "completed", "Completed"
+    INTERPRETATION_ERROR = "interpretation_error", "Interpretation error"
 
 
 class Sex(models.TextChoices):
-    F = "F", "Feminino"
-    M = "M", "Masculino"
+    F = "F", "Female"
+    M = "M", "Male"
 
 
 class EcgLayout(models.TextChoices):
-    """Layouts do contrato antigo. A leitura 2.0 só aceita SUPPORTED_LAYOUTS; os demais ficam
-    aqui para os registros já gravados."""
+    """Old-contract layouts. Reading 2.0 only accepts SUPPORTED_LAYOUTS; the others stay
+    here for records already stored."""
 
     L3X4 = "3x4", "3x4"
     L3X4_1 = "3x4+1", "3x4+1"
@@ -35,14 +35,14 @@ class EcgLayout(models.TextChoices):
     L12X1 = "12x1", "12x1"
 
 
-# Layouts com configuração na ecg-reading 2.0 (CONTRATO_LAMBDAS.md §2); os demais dão LAYOUT_UNSUPPORTED.
+# Layouts configured in ecg-reading 2.0 (the lambda contract, §2); the others return LAYOUT_UNSUPPORTED.
 SUPPORTED_LAYOUTS = (EcgLayout.L3X4_1, EcgLayout.L12X1)
 
 
 class Classification(models.TextChoices):
     NORMAL = "normal", "Normal"
-    BORDERLINE = "borderline", "Limítrofe"
-    ABNORMAL = "abnormal", "Anormal"
+    BORDERLINE = "borderline", "Borderline"
+    ABNORMAL = "abnormal", "Abnormal"
 
 
 class Patient(models.Model):
@@ -54,17 +54,17 @@ class Patient(models.Model):
     )
     name = models.CharField(max_length=255)
     age = models.IntegerField()
-    # Usado na interpretação (CONTRATO_LAMBDAS.md §3.1). Nulo só em pacientes legados.
+    # Used by the interpretation (lambda contract §3.1). Null only for legacy patients.
     sex = models.CharField(max_length=1, choices=Sex.choices, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.name} ({self.age} anos)"
+        return f"{self.name} ({self.age} years)"
 
 
 class Exam(models.Model):
-    """Encontro clínico: paciente + médico + motivo. Leve — nunca guarda
-    dado de processamento diretamente (isso vive em ExamAttempt)."""
+    """Clinical encounter: patient + doctor + reason. Lightweight: never stores
+    processing data directly (that lives in ExamAttempt)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     patient = models.ForeignKey(
@@ -76,7 +76,7 @@ class Exam(models.Model):
         related_name="exams",
     )
     status = models.CharField(
-        max_length=40, choices=ExamStatus.choices, default=ExamStatus.CRIADO
+        max_length=40, choices=ExamStatus.choices, default=ExamStatus.CREATED
     )
     reason = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -87,11 +87,11 @@ class Exam(models.Model):
 
 
 class ExamAttempt(models.Model):
-    """Uma foto do ECG passando pela leitura e pela interpretação.
+    """One ECG photo going through reading and interpretation.
 
-    Recusar ou refazer com outra foto = criar nova linha (histórico preservado).
+    Rejecting or redoing with another photo = a new row (history preserved).
 
-    `reading` (gravado pela leitura, sem `samples` — o sinal fica no S3)::
+    `reading` (written by the reading, without `samples`: the signal stays in S3)::
 
         {status, warnings, error, meta, grid,
          leads: [{name, kind, quality, coverage}],
@@ -99,10 +99,10 @@ class ExamAttempt(models.Model):
                      refusal_preview: {bucket, key} | null},
          refusal_region_px}
 
-    `interpretation`: ``{status, warnings, error, meta}``; o resultado clínico vai para `Report`.
+    `interpretation`: ``{status, warnings, error, meta}``; the clinical result goes to `Report`.
 
-    `test_scenario`: ``{"read": {"scenario", "code"?}, "interpret": {...}}`` — repassado como
-    `mock` às lambdas (CONTRATO_LAMBDAS.md §4); só staff com ECG_TEST_SCENARIOS_ENABLED.
+    `test_scenario`: ``{"read": {"scenario", "code"?}, "interpret": {...}}``, forwarded as
+    `mock` to the lambdas (lambda contract §4); staff only, with ECG_TEST_SCENARIOS_ENABLED.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -112,11 +112,11 @@ class ExamAttempt(models.Model):
     status = models.CharField(
         max_length=40,
         choices=ExamStatus.choices,
-        default=ExamStatus.CRIADO,
+        default=ExamStatus.CREATED,
     )
-    imagem_s3_key = models.CharField(max_length=500)
+    image_s3_key = models.CharField(max_length=500)
     layout = models.CharField(max_length=10, choices=EcgLayout.choices, default=EcgLayout.L3X4_1)
-    calibracao = models.JSONField(null=True, blank=True)
+    calibration = models.JSONField(null=True, blank=True)
     reading = models.JSONField(null=True, blank=True)
     interpretation = models.JSONField(null=True, blank=True)
     test_scenario = models.JSONField(null=True, blank=True)
@@ -131,7 +131,7 @@ class ExamAttempt(models.Model):
 
 
 class Report(models.Model):
-    """Resultado da interpretação (CONTRATO_LAMBDAS.md §3.2), 1:1 com a tentativa."""
+    """Interpretation result (lambda contract §3.2), 1:1 with the attempt."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     attempt = models.OneToOneField(
@@ -153,7 +153,7 @@ class Report(models.Model):
 
 
 class Feedback(models.Model):
-    """Crítica do médico sobre uma tentativa específica."""
+    """Doctor feedback on a specific attempt."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     attempt = models.ForeignKey(

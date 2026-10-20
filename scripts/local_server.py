@@ -1,18 +1,18 @@
-"""Backend local completo, sem AWS: Django + lambdas falsas no mesmo processo + S3 falso em disco.
+"""Full local backend, no AWS: Django + fake lambdas in the same process + fake S3 on disk.
 
-Para desenvolver e conferir o app sem gravar nada na AWS:
-- `services._lambda_client()` vira um cliente falso: a leitura é `scripts/local_lambdas.py` (contrato
-  2.0, cenários do campo `mock`) e a interpretação é o handler mock de verdade do repo
+To develop and check the app without writing anything to AWS:
+- `services._lambda_client()` becomes a fake client: the reading is `scripts/local_lambdas.py` (contract
+  2.0, `mock` field scenarios) and the interpretation is the real mock handler from the repo
   tl-gmiler/ecg-lambdas-v1 (`mock_lambdas/interpretation/handler.py`), lido de `--lambdas-repo`;
-- o S3 (presigned PUT/GET, artefatos das lambdas, sinal) vira uma pasta local servida em `/__local_s3/`;
-- `ECG_TASK_MODE=inline`, cenários de teste ligados e um usuário staff `dev` / `dev12345`;
-- `--async N`: imita a fila de produção. O endpoint responde 202 na hora e a fase roda numa thread
-  depois de N segundos (o app faz polling, como com o worker SQS).
+- S3 (presigned PUT/GET, lambda artifacts, signal) becomes a local folder served at `/__local_s3/`;
+- `ECG_TASK_MODE=inline`, test scenarios on and a staff user `dev` / `dev12345`;
+- `--async N`: mimics the production queue. The endpoint answers 202 right away and the phase runs in a thread
+  after N seconds (the app polls, as with the SQS worker).
 
-Uso (venv com os requirements do backend + Pillow + numpy):
+Usage (venv with the backend requirements + Pillow + numpy):
     python scripts/local_server.py [--port 23132] [--data /tmp/ecg-local] [--async 3]
                                    [--lambdas-repo ../ecg-lambdas-v1]
-Se existir `frontend_dist/` (export web do Expo), o app web abre na raiz, mesma origem da API.
+If `frontend_dist/` exists (Expo web export), the web app opens at the root, same origin as the API.
 """
 
 import argparse
@@ -33,16 +33,16 @@ def parse_args():
     parser.add_argument("--port", type=int, default=23132)
     parser.add_argument("--data", default="/tmp/ecg-local", help="pasta do SQLite e do S3 falso")
     parser.add_argument("--async", dest="async_delay", type=float, default=None, metavar="SEGUNDOS",
-                        help="roda as fases numa thread após SEGUNDOS (imita a fila SQS)")
+                        help="runs the phases in a thread after SECONDS (mimics the SQS queue)")
     parser.add_argument("--lambdas-repo", default=os.environ.get("ECG_LAMBDAS_V1_DIR", str(ROOT.parent / "ecg-lambdas-v1")),
-                        help="clone do tl-gmiler/ecg-lambdas-v1 (interpretação mock e ecg_contract)")
+                        help="clone of tl-gmiler/ecg-lambdas-v1 (mock interpretation and ecg_contract)")
     return parser.parse_args()
 
 
 ARGS = parse_args()
 LAMBDAS = Path(ARGS.lambdas_repo).resolve() / "mock_lambdas"
 if not (LAMBDAS / "interpretation" / "handler.py").is_file():
-    sys.exit(f"Não achei {LAMBDAS}/interpretation/handler.py; clone o tl-gmiler/ecg-lambdas-v1 e use --lambdas-repo.")
+    sys.exit(f"{LAMBDAS}/interpretation/handler.py not found; clone tl-gmiler/ecg-lambdas-v1 and use --lambdas-repo.")
 DATA = Path(ARGS.data)
 S3_DIR = DATA / "s3"
 BASE_URL = f"http://127.0.0.1:{ARGS.port}"
@@ -68,12 +68,12 @@ def _client_error(code, operation):
 def _path(bucket, key):
     path = (S3_DIR / bucket / key).resolve()
     if not str(path).startswith(str(S3_DIR.resolve()) + os.sep):
-        raise ValueError("chave fora do S3 local")
+        raise ValueError("key outside the local S3")
     return path
 
 
 class FakeS3:
-    """Subconjunto do cliente S3 usado pelas lambdas mock e pelo backend."""
+    """Subset of the S3 client used by the mock lambdas and the backend."""
 
     def put_object(self, Bucket, Key, Body, ContentType=None, **_):
         path = _path(Bucket, Key)
@@ -104,7 +104,7 @@ def _load_handler(name, path):
 
 
 class FakeLambda:
-    """Chama os handlers no processo; mesmo formato de resposta do boto3 `invoke`."""
+    """Calls the handlers in-process; same response format as boto3 `invoke`."""
 
     def __init__(self, s3):
         import local_lambdas
@@ -182,7 +182,7 @@ def main():
             response = HttpResponse(status=200)
         else:
             return HttpResponseNotFound()
-        # O Expo dev server (porta 8081) sobe a foto direto aqui, como faria no S3.
+        # The Expo dev server (port 8081) uploads the photo straight here, as it would to S3.
         response["Access-Control-Allow-Origin"] = "*"
         response["Access-Control-Allow-Methods"] = "GET, PUT, HEAD, OPTIONS"
         response["Access-Control-Allow-Headers"] = "Content-Type"
@@ -194,9 +194,9 @@ def main():
     User = get_user_model()
     if not User.objects.filter(username="dev").exists():
         User.objects.create_superuser(username="dev", password="dev12345", email="dev@local", name="Dra. Dev")
-        print("Usuário criado: dev / dev12345 (staff)")
-    mode = "inline" if ARGS.async_delay is None else f"assíncrono, {ARGS.async_delay:g} s por fase"
-    print(f"Backend local (lambdas falsas + S3 em {S3_DIR}, fases {mode}) em {BASE_URL}")
+        print("User created: dev / dev12345 (staff)")
+    mode = "inline" if ARGS.async_delay is None else f"async, {ARGS.async_delay:g} s per phase"
+    print(f"Local backend (fake lambdas + S3 in {S3_DIR}, phases {mode}) at {BASE_URL}")
     call_command("runserver", f"127.0.0.1:{ARGS.port}", use_reloader=False)
 
 

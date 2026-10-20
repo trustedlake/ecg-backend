@@ -1,5 +1,5 @@
-# ECS Fargate (ARM): uma task com dois containers da mesma imagem — `web` (gunicorn + SPA) e
-# `worker` (manage.py ecg_worker, long polling na SQS). Entrada só pelo VPC Link via Cloud Map (api.tf).
+# ECS Fargate (ARM): one task with two containers from the same image: `web` (gunicorn + SPA) and
+# `worker` (manage.py ecg_worker, SQS long polling). Entry only through the VPC Link via Cloud Map (api.tf).
 
 resource "aws_cloudwatch_log_group" "backend" {
   name              = "/ecs/ecg-backend"
@@ -15,7 +15,7 @@ resource "aws_ecs_cluster" "this" {
   }
 }
 
-# --- Cloud Map: o HTTP API descobre IP e porta das tasks pelo registro SRV ---
+# --- Cloud Map: the HTTP API discovers task IP and port through the SRV record ---
 
 resource "aws_service_discovery_private_dns_namespace" "this" {
   name = "${local.name}.internal"
@@ -35,8 +35,8 @@ resource "aws_service_discovery_service" "backend" {
     }
   }
 
-  # O ECS informa a saúde (health check do container web) e tira do Cloud Map a task doente.
-  # O bloco vazio não chega à AWS (o provider omite); failure_threshold (obsoleto, a AWS sempre usa 1) o força.
+  # ECS reports health (web container health check) and removes an unhealthy task from Cloud Map.
+  # An empty block never reaches AWS (the provider omits it); failure_threshold (obsolete, AWS always uses 1) forces it.
   health_check_custom_config {
     failure_threshold = 1
   }
@@ -48,7 +48,7 @@ locals {
   api_host  = "${aws_apigatewayv2_api.this.id}.execute-api.${var.region}.amazonaws.com"
   image_uri = "${aws_ecr_repository.backend.repository_url}:${var.image_tag}"
 
-  # Host do execute-api para o tráfego real; localhost para o health check do próprio container.
+  # execute-api host for real traffic; localhost for the container's own health check.
   allowed_hosts = concat([local.api_host, "localhost", "127.0.0.1"], var.extra_allowed_hosts)
 
   container_environment = [for k, v in {
@@ -133,7 +133,7 @@ resource "aws_ecs_task_definition" "backend" {
   ])
 }
 
-# --- Serviço ---
+# --- Service ---
 
 resource "aws_ecs_service" "backend" {
   name             = "ecg-backend"
@@ -142,8 +142,8 @@ resource "aws_ecs_service" "backend" {
   launch_type      = "FARGATE"
   platform_version = "LATEST"
 
-  # Começa em 0: a imagem só existe depois do primeiro build do pipeline (I3). A partir daí quem
-  # manda na quantidade é o autoscaling (schedule.tf) e na revisão é o ci/deploy.sh.
+  # Starts at 0: the image only exists after the first pipeline build (I3). From then on the
+  # count is driven by autoscaling (schedule.tf) and the revision by ci/deploy.sh.
   desired_count = 0
 
   deployment_minimum_healthy_percent = 100

@@ -1,14 +1,14 @@
-# Horário comercial (seg–sex, America/Sao_Paulo): RDS 07:40–20:10, ECS 08:00–20:00.
-# Fora disso não há task no Cloud Map e o API Gateway responde 503 (o app mostra o aviso de horário).
-# Exceções: scripts/ligar.sh e scripts/desligar.sh.
+# Business hours (Mon-Fri, schedule timezone below): RDS 07:40-20:10, ECS 08:00-20:00.
+# Outside that there is no task in Cloud Map and API Gateway answers 503 (the app shows the business-hours notice).
+# Exceptions: scripts/start.sh and scripts/stop.sh.
 
 resource "aws_appautoscaling_target" "backend" {
   service_namespace  = "ecs"
   resource_id        = "service/${aws_ecs_cluster.this.name}/${aws_ecs_service.backend.name}"
   scalable_dimension = "ecs:service:DesiredCount"
 
-  # Nasce em 0 (a imagem só existe depois do primeiro build): o ci/deploy.sh ou a ação das 08:00 sobem
-  # para min 1. Depois disso as ações agendadas (e os scripts) mexem em min/max ao longo do dia.
+  # Starts at 0 (the image only exists after the first build): ci/deploy.sh or the 08:00 action raise it
+  # to min 1. After that the scheduled actions (and the scripts) change min/max during the day.
   min_capacity = 0
   max_capacity = 2
 
@@ -66,11 +66,11 @@ resource "aws_appautoscaling_scheduled_action" "ecs_stop" {
     max_capacity = 0
   }
 
-  # A API do Application Auto Scaling não aceita duas ações agendadas em paralelo no mesmo alvo.
+  # The Application Auto Scaling API does not accept two parallel scheduled actions on the same target.
   depends_on = [aws_appautoscaling_scheduled_action.ecs_start]
 }
 
-# --- RDS: EventBridge Scheduler com alvo universal do SDK ---
+# --- RDS: EventBridge Scheduler with the SDK universal target ---
 
 resource "aws_scheduler_schedule_group" "this" {
   count = var.office_hours_enabled ? 1 : 0

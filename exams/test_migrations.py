@@ -1,4 +1,4 @@
-"""Migração de dados do pipeline ecg-analyser para o contrato v1 (exams 0002–0004)."""
+"""Data migration from the legacy ecg-analyser pipeline to contract v1 (exams 0002-0004)."""
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor

@@ -28,7 +28,7 @@ class ParseBodyTests(SimpleTestCase):
         self.assertEqual(parse_body(valid_body("interpret", "abc")), ("interpret", "abc"))
 
     def test_invalid(self):
-        for body in ["", "não é json", "[]", "null", json.dumps({"ecg_task": "refine", "attempt_id": "x"}),
+        for body in ["", "not json", "[]", "null", json.dumps({"ecg_task": "refine", "attempt_id": "x"}),
                      json.dumps({"ecg_task": "read"}), json.dumps({"ecg_task": "read", "attempt_id": 1})]:
             with self.subTest(body=body):
                 self.assertIsNone(parse_body(body))
@@ -64,7 +64,7 @@ class WorkerTests(SimpleTestCase):
         client.delete_message.assert_called_once_with(QueueUrl=QUEUE, ReceiptHandle="rh-1")
 
     def test_message_not_deleted_if_processing_crashes(self, run_task, _close):
-        # run_task nunca levanta; se algo além dele falhar, a mensagem fica para nova entrega.
+        # run_task never raises; if anything else fails, the message stays for redelivery.
         run_task.side_effect = RuntimeError("boom")
         worker, client = self.make({"Messages": [msg(valid_body())]})
         with self.assertRaises(RuntimeError):
@@ -81,7 +81,7 @@ class WorkerTests(SimpleTestCase):
         worker, client = self.make({"Messages": [msg(valid_body())]}, {"Messages": [msg(valid_body(), "rh-2")]})
 
         def run_and_get_signal(*args):
-            worker.stop(signal.SIGTERM)  # sinal chega no meio da fase
+            worker.stop(signal.SIGTERM)  # signal arrives mid-phase
             return True
 
         run_task.side_effect = run_and_get_signal

@@ -33,7 +33,7 @@ class ExamPagination(pagination.PageNumberPagination):
 
 
 class ExamListCreateView(APIView):
-    """GET /api/exams/ — lista (com paginação) · POST /api/exams/ — cria."""
+    """GET /api/exams/: list (paginated) · POST /api/exams/: create."""
 
     permission_classes = [IsAuthenticated]
 
@@ -58,7 +58,7 @@ class ExamListCreateView(APIView):
 
 
 class ExamDetailView(APIView):
-    """GET /api/exams/<id>/ — detalhe + tentativas + report + URLs presigned."""
+    """GET /api/exams/<id>/: detail + attempts + report + presigned URLs."""
 
     permission_classes = [IsAuthenticated]
 
@@ -76,7 +76,7 @@ class ExamDetailView(APIView):
 
 
 class AttemptCreateView(APIView):
-    """POST /api/exams/<id>/attempts/ — cria tentativa + presigned PUT URL."""
+    """POST /api/exams/<id>/attempts/: creates an attempt + presigned PUT URL."""
 
     permission_classes = [IsAuthenticated]
 
@@ -92,14 +92,14 @@ class AttemptCreateView(APIView):
         attempt = ExamAttempt.objects.create(
             id=attempt_id,
             exam=exam,
-            status=ExamStatus.CRIADO,
-            imagem_s3_key=key,
+            status=ExamStatus.CREATED,
+            image_s3_key=key,
             layout=data["layout"],
-            calibracao={"speed_mm_s": data["speed_mm_s"], "gain_mm_mv": data["gain_mm_mv"]},
+            calibration={"speed_mm_s": data["speed_mm_s"], "gain_mm_mv": data["gain_mm_mv"]},
             test_scenario=data.get("test_scenario"),
         )
-        # O exame espelha a tentativa mais recente.
-        exam.status = ExamStatus.CRIADO
+        # The exam mirrors the latest attempt.
+        exam.status = ExamStatus.CREATED
         exam.save(update_fields=["status", "updated_at"])
 
         upload_url = services.presign_put_url(
@@ -119,7 +119,7 @@ class AttemptCreateView(APIView):
 
 
 class FeedbackCreateView(APIView):
-    """POST /api/attempts/<attempt_id>/feedback/ — crítica do médico."""
+    """POST /api/attempts/<attempt_id>/feedback/: doctor feedback."""
 
     permission_classes = [IsAuthenticated]
 
@@ -139,14 +139,14 @@ class FeedbackCreateView(APIView):
 
 def _invalid_state(attempt):
     return Response(
-        {"detail": f"Ação não permitida no estado atual da tentativa ({attempt.status}).",
+        {"detail": f"Action not allowed in the attempt's current state ({attempt.status}).",
          "code": "invalid_state"},
         status=status.HTTP_409_CONFLICT,
     )
 
 
 class AttemptActionView(APIView):
-    """Base das rotas /api/exams/<exam_id>/attempts/<attempt_id>/…: isola por médico (404)."""
+    """Base of the /api/exams/<exam_id>/attempts/<attempt_id>/... routes: scoped per doctor (404)."""
 
     permission_classes = [IsAuthenticated]
 
@@ -162,7 +162,7 @@ class AttemptActionView(APIView):
         return Response(AttemptSerializer(attempt).data, status=code)
 
     def start_phase(self, attempt, phase, from_statuses):
-        """CAS para o `*_processando` da fase + dispatch. Dois toques: o segundo recebe 409."""
+        """CAS into the phase's processing state + dispatch. Two taps: the second one gets 409."""
         processing = services.PHASES[phase][0]
         if not services.transition(attempt, from_statuses, processing):
             return _invalid_state(attempt)
@@ -171,51 +171,51 @@ class AttemptActionView(APIView):
 
 
 class AttemptDetailView(AttemptActionView):
-    """GET …/attempts/<id>/ — objeto Attempt (endpoint de polling do app)."""
+    """GET .../attempts/<id>/: Attempt object (the app's polling endpoint)."""
 
     def get(self, request, exam_id, attempt_id):
         return self.respond(self.get_attempt(request, exam_id, attempt_id))
 
 
 class AttemptReadView(AttemptActionView):
-    """POST …/attempts/<id>/read/ — dispara a leitura (depois do PUT da foto)."""
+    """POST .../attempts/<id>/read/: starts the reading (after the photo PUT)."""
 
     def post(self, request, exam_id, attempt_id):
         attempt = self.get_attempt(request, exam_id, attempt_id)
-        return self.start_phase(attempt, "read", ExamStatus.CRIADO)
+        return self.start_phase(attempt, "read", ExamStatus.CREATED)
 
 
 class AttemptAcceptView(AttemptActionView):
-    """POST …/attempts/<id>/accept/ — usuário aprovou a leitura → interpretação."""
+    """POST .../attempts/<id>/accept/: the user approved the reading -> interpretation."""
 
     def post(self, request, exam_id, attempt_id):
         attempt = self.get_attempt(request, exam_id, attempt_id)
-        return self.start_phase(attempt, "interpret", ExamStatus.AGUARDANDO_VALIDACAO)
+        return self.start_phase(attempt, "interpret", ExamStatus.AWAITING_VALIDATION)
 
 
 class AttemptRejectView(AttemptActionView):
-    """POST …/attempts/<id>/reject/ — usuário recusou a leitura (nova foto = nova tentativa)."""
+    """POST .../attempts/<id>/reject/: the user rejected the reading (new photo = new attempt)."""
 
     def post(self, request, exam_id, attempt_id):
         attempt = self.get_attempt(request, exam_id, attempt_id)
-        if not services.transition(attempt, ExamStatus.AGUARDANDO_VALIDACAO, ExamStatus.REJEITADO_USUARIO):
+        if not services.transition(attempt, ExamStatus.AWAITING_VALIDATION, ExamStatus.USER_REJECTED):
             return _invalid_state(attempt)
         return self.respond(attempt)
 
 
 class AttemptRetryView(AttemptActionView):
-    """POST …/attempts/<id>/retry/ — reexecuta a fase que falhou, se o erro for retryable."""
+    """POST .../attempts/<id>/retry/: reruns the failed phase if the error is retryable."""
 
     def post(self, request, exam_id, attempt_id):
         attempt = self.get_attempt(request, exam_id, attempt_id)
         if not services.attempt_flags(attempt)["can_retry"]:
             return _invalid_state(attempt)
-        phase = "read" if attempt.status == ExamStatus.ERRO_LEITURA else "interpret"
+        phase = "read" if attempt.status == ExamStatus.READING_ERROR else "interpret"
         return self.start_phase(attempt, phase, attempt.status)
 
 
 class ConfigView(APIView):
-    """GET /api/config/ — opções do formulário da tentativa."""
+    """GET /api/config/: options for the attempt form."""
 
     permission_classes = [IsAuthenticated]
 
@@ -232,7 +232,7 @@ class ConfigView(APIView):
 
 
 class HealthView(APIView):
-    """GET /api/health/ — sem auth; usado pelo health check do deploy e pelo smoke."""
+    """GET /api/health/: no auth; used by the deploy health check and the smoke test."""
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -243,7 +243,7 @@ class HealthView(APIView):
                 cursor.execute("SELECT 1")
                 cursor.fetchone()
         except Exception:
-            logger.exception("Health check: banco indisponível")
+            logger.exception("Health check: database unavailable")
             return Response(
                 {"status": "error", "db": "error", "version": settings.APP_VERSION},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,

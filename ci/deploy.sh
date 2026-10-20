@@ -75,7 +75,8 @@ log "Revisão nova: $new_td (anterior: $previous_td, imagem anterior: $previous_
 run_one_off() {
   local label="$1"; shift
   local cmd_json overrides task_arn task_id exit_code
-  cmd_json=$(jq -cn '$ARGS.positional' --args "$@")
+  # Via stdin: com --args o jq ainda lê como opção dele um argumento como "--noinput".
+  cmd_json=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
   # O worker é essencial: fica parado (signal.pause) até o web terminar e a task parar.
   overrides=$(jq -cn --argjson cmd "$cmd_json" '{containerOverrides: [
     {name: "web", command: $cmd},

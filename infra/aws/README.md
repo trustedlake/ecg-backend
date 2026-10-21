@@ -58,8 +58,9 @@ on the next pipeline deploy (the service ignores `task_definition`).
 
 ## CI/CD (`cicd.tf`, `ci/`)
 CodePipeline V2 `ecg-backend` (QUEUED mode): a push to `main` of `tl-gmiler/ecg-backend` **or**
-`trustedlake/ecg-reader` -> **Test** (`ci/buildspec-test.yml`) -> **Build** (Expo web export with
-`scripts/build_frontend.sh` + ARM image in ECR, tag `<back sha>-<front sha>`) -> **Deploy** (`ci/deploy.sh`).
+`trustedlake/ecg-reader` -> **Test** (`ci/buildspec-test.yml`) and **Build** (Expo web export with
+`scripts/build_frontend.sh` + ARM image in ECR, tag `<back sha>-<front sha>`) in parallel -> **Deploy** (`ci/deploy.sh`).
+Timings, optimizations and cost per deploy: `docs/deploy-pipeline.md` (`scripts/pipeline_timing.sh` measures them).
 A pipeline failure sends an email through the SNS topic `ecg-alerts`.
 
 1. **Authorize GitHub (once, after the apply):** the repos are in different accounts and each connection
@@ -71,7 +72,7 @@ A pipeline failure sends an email through the SNS topic `ecg-alerts`.
 2. **Trigger by hand:** `aws codepipeline start-pipeline-execution --name ecg-backend`.
 3. **What the deploy does:** starts RDS if it is stopped, registers a new task definition revision
    (from the latest one in the family, so Terraform changes land here), runs `migrate` and
-   `ensure_admin` in one-off tasks, updates the service, smoke-tests `/api/health/` (new version) and `/`,
+   `ensure_admin` in a single one-off task, updates the service, waits for the new task, smoke-tests `/api/health/` (new version) and `/`,
    and rolls back to the previous revision if the smoke test fails.
 4. **Deploy outside business hours:** the environment is turned on only for the deploy and turned off again at the end
    (ECS at 0, RDS stopping). Within business hours it stays as it is.

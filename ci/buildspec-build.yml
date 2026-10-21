@@ -30,3 +30,7 @@ phases:
 artifacts:
   files:
     - image.env
+
+cache:
+  paths:
+    - /root/.npm/**/*

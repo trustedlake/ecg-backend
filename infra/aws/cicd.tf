@@ -1,4 +1,4 @@
-# CI/CD on AWS: CodePipeline V2 (QUEUED) with two GitHub sources -> CodeBuild ARM test -> build -> deploy.
+# CI/CD on AWS: CodePipeline V2 (QUEUED) with two GitHub sources -> CodeBuild ARM test || build (parallel) -> deploy.
 # Buildspecs and deploy in ci/. The GitHub connection starts PENDING: authorize it in the console (see README).
 
 # Each GitHub account needs its own connection (one connection = one install of the AWS app).
@@ -114,7 +114,19 @@ locals {
   ecs_service_arn = "arn:aws:ecs:${var.region}:${local.account_id}:service/${aws_ecs_cluster.this.name}/${aws_ecs_service.backend.name}"
 
   codebuild_stage_statements = {
-    test = []
+    test = [
+      {
+        # Pre-warm: the Test action starts RDS when it is stopped, so the boot overlaps with build (ci/buildspec-test.yml).
+        sid       = "DatabaseWake"
+        actions   = ["rds:StartDBInstance"]
+        resources = [aws_db_instance.this.arn]
+      },
+      {
+        sid       = "DatabaseDescribe"
+        actions   = ["rds:DescribeDBInstances"]
+        resources = [aws_db_instance.this.arn]
+      },
+    ]
     build = [
       {
         sid       = "EcrLogin"
@@ -223,7 +235,7 @@ resource "aws_iam_role_policy" "codebuild" {
 
 locals {
   codebuild_env = {
-    test  = {}
+    test  = { DB_ID = aws_db_instance.this.identifier }
     build = { ECR_REPOSITORY_URL = aws_ecr_repository.backend.repository_url }
     deploy = {
       ECR_REPOSITORY_URL   = aws_ecr_repository.backend.repository_url
@@ -252,6 +264,16 @@ resource "aws_codebuild_project" "stage" {
 
   artifacts {
     type = "CODEPIPELINE"
+  }
+
+  # Local (free) cache on the build host: pip/npm downloads and Docker layers. Best effort: reuse only happens
+  # when a build lands on a still-warm host, so it is a small gain for a pipeline that runs a few times a day.
+  dynamic "cache" {
+    for_each = each.key == "deploy" ? [] : [1]
+    content {
+      type  = "LOCAL"
+      modes = each.key == "build" ? ["LOCAL_DOCKER_LAYER_CACHE", "LOCAL_CUSTOM_CACHE"] : ["LOCAL_CUSTOM_CACHE"]
+    }
   }
 
   environment {
@@ -370,27 +392,29 @@ resource "aws_codepipeline" "this" {
     }
   }
 
+  # Test and Build run in parallel (same stage and run_order): the image is immutable-tagged and only the
+  # Deploy stage, which needs both to succeed, publishes it to the service.
   stage {
-    name = "Test"
+    name = "TestAndBuild"
+
     action {
       name            = "Test"
       category        = "Build"
       owner           = "AWS"
       provider        = "CodeBuild"
       version         = "1"
+      run_order       = 1
       input_artifacts = ["backend"]
       configuration   = { ProjectName = aws_codebuild_project.stage["test"].name }
     }
-  }
 
-  stage {
-    name = "Build"
     action {
       name             = "Build"
       category         = "Build"
       owner            = "AWS"
       provider         = "CodeBuild"
       version          = "1"
+      run_order        = 1
       input_artifacts  = ["backend", "frontend"]
       output_artifacts = ["image"]
       configuration = {

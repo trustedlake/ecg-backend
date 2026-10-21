@@ -95,7 +95,8 @@ payload of the matching lambda.
     "overlay_url": "presigned GET | null",
     "refusal_preview_url": "presigned GET | null",
     "refusal_region_px": [x0,y0,x1,y1] | null,
-    "leads": [{"name","kind","quality","coverage"}]
+    "leads": [{"name","kind","quality","coverage"}],
+    "methods": [{"method","status","selector_score","chosen","image_url": "presigned GET | null"}]  // the six, registry order
   },
   "interpretation": null | {
     "status": "OK|OK_WITH_WARNINGS|ERROR",

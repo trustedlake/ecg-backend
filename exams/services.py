@@ -389,12 +389,19 @@ def build_reading_payload(attempt):
     return payload
 
 
-def _methods_summary(methods):
-    """Summary of the six methods (audit only; not sent to the API)."""
-    return [
-        {k: m.get(k) for k in ("method", "version", "status", "reason", "selector_score")}
-        for m in methods if isinstance(m, dict)
-    ] if isinstance(methods, list) else []
+def _methods_summary(methods, request_id):
+    """Summary of the six methods; `image` is the preview (`rejection_preview` when not OK) shown per method."""
+    if not isinstance(methods, list):
+        return []
+    summary = []
+    for m in methods:
+        if not isinstance(m, dict):
+            continue
+        files = m.get("files") if isinstance(m.get("files"), dict) else {}
+        item = {k: m.get(k) for k in ("method", "version", "status", "reason", "selector_score")}
+        item["image"] = _artifact(files.get("image"), request_id)
+        summary.append(item)
+    return summary
 
 
 def _choose_method(methods, request_id):
@@ -518,7 +525,7 @@ def _read_success(envelope, reading, request_id):
     chosen = _choose_method(methods, request_id)
     if chosen is None:
         return _reading_error(envelope, "INTERNAL_ERROR", request_id,
-                              f"no usable OK method: {_methods_summary(methods)!r}"[:LOG_BODY_LIMIT])
+                              f"no usable OK method: {_methods_summary(methods, request_id)!r}"[:LOG_BODY_LIMIT])
     method, leads_ref, image_ref = chosen
     try:
         leads_doc = _read_json_from_s3(leads_ref["bucket"], leads_ref["key"])
@@ -543,7 +550,7 @@ def _read_success(envelope, reading, request_id):
         "selector_score": method["selector_score"],
         "sampling_rate_hz": method.get("sampling_rate_hz"),
     }
-    reading["methods"] = _methods_summary(methods)
+    reading["methods"] = _methods_summary(methods, request_id)
     reading["variants"] = _usable_methods(methods, request_id)
     return reading
 
@@ -569,7 +576,7 @@ def run_reading(attempt):
         # The preview is optional; outside the attempt's bucket/prefix it is dropped.
         reading["artifacts"]["refusal_preview"] = _refusal_preview(details, request_id)
         reading["refusal_region_px"] = _region_px(details.get("region_px"))
-        reading["methods"] = _methods_summary(details.get("methods"))
+        reading["methods"] = _methods_summary(details.get("methods"), request_id)
         _finish(attempt, "read", ExamStatus.READING_REFUSED, reading=reading)
         return attempt.status
 
@@ -577,7 +584,7 @@ def run_reading(attempt):
         error = envelope["error"]
         details = error.get("details") if isinstance(error.get("details"), dict) else {}
         reading["error"] = _public_error(error)
-        reading["methods"] = _methods_summary(details.get("methods"))
+        reading["methods"] = _methods_summary(details.get("methods"), request_id)
 
     _finish(attempt, "read", ExamStatus.READING_ERROR, reading=reading)
     return attempt.status
@@ -680,6 +687,7 @@ def attempt_reading_view(attempt, expires_in=None):
         return None
     expires_in = expires_in or settings.PRESIGN_URL_EXPIRES
     artifacts = reading.get("artifacts") or {}
+    chosen = (reading.get("method") or {}).get("name")
     return {
         "status": reading.get("status"),
         "warnings": reading.get("warnings") or [],
@@ -692,6 +700,16 @@ def attempt_reading_view(attempt, expires_in=None):
         "variants": [
             {"id": v["id"], "overlay_url": _presign_artifact(v["overlay"], expires_in), "score": v["score"]}
             for v in reading_variants(reading)
+        ],
+        "methods": [
+            {
+                "method": m.get("method"),
+                "status": m.get("status"),
+                "selector_score": m.get("selector_score"),
+                "chosen": m.get("method") == chosen,
+                "image_url": _presign_artifact(m.get("image"), expires_in),
+            }
+            for m in reading.get("methods") or []
         ],
     }
 

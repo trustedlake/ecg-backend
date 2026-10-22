@@ -516,10 +516,19 @@ class AttemptViewsTest(ServicesTestCase):
         services.run_reading(self.attempt)
         view = services.attempt_reading_view(self.attempt)
         self.assertEqual(set(view), {"status", "warnings", "error", "overlay_url", "refusal_preview_url",
-                                     "refusal_region_px", "leads", "variants"})
+                                     "refusal_region_px", "leads", "variants", "methods"})
         self.assertEqual(view["overlay_url"], f"https://signed/{RESULTS}/reading/{self.rid}/run1/faint_ink/preview.png")
         self.assertIsNone(view["refusal_preview_url"])
         self.assertEqual(len(view["leads"]), 2)
+        # All six methods keep their own image (preview.png, or rejection_preview.png when not OK).
+        self.assertEqual([m["method"] for m in view["methods"]],
+                         ["baseline_peaks", "chromatic_ink", "faint_ink", "uneven_photo",
+                          "grayscale_contrast", "same_appearance"])
+        base = f"https://signed/{RESULTS}/reading/{self.rid}/run1"
+        self.assertEqual(view["methods"][0]["image_url"], f"{base}/baseline_peaks/preview.png")
+        self.assertEqual(view["methods"][1]["image_url"], f"{base}/chromatic_ink/rejection_preview.png")
+        self.assertTrue(all(m["image_url"] for m in view["methods"]))
+        self.assertEqual([m["method"] for m in view["methods"] if m["chosen"]], ["faint_ink"])
         self.assertNotIn("samples", json.dumps(view))
         self.assertNotIn("https://", json.dumps(ExamAttempt.objects.get(id=self.attempt.id).reading))
 

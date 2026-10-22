@@ -80,7 +80,7 @@ Off-hours deploys (RDS stopped): 18-19 min before; RDS boot (~6 min) now overlap
 
 | Run | Total | TestAndBuild | Deploy | Cost |
 |---|---|---|---|---|
-| _pending first runs after merge + `terraform apply`_ | | | | |
+| 2026-10-22 08:16 (PR #17, warm RDS, cold CodeBuild cache) | 6.3 min | Build 186 s (Test 62 s in parallel) | 186 s (one-off task 70 s, rollout + smoke 67 s) | ~US$0.073 |
 
 ## 5. Rollout order
 

@@ -195,6 +195,9 @@ STORAGES = {
 FRONTEND_DIST = BASE_DIR / "frontend_dist"
 WHITENOISE_ROOT = FRONTEND_DIST if FRONTEND_DIST.is_dir() else None
 
+# /phone.html embeds the app in an iframe on the same origin; other sites stay blocked.
+X_FRAME_OPTIONS = "SAMEORIGIN"
+
 # Logging: everything to stdout (CloudWatch Logs via awslogs), one line per event.
 LOG_LEVEL = env("LOG_LEVEL", default="INFO")
 LOGGING = {

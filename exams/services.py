@@ -416,6 +416,86 @@ def _choose_method(methods, request_id):
     return best
 
 
+def _usable_methods(methods, request_id):
+    """Every `OK` method with a score and valid `files.leads`/`files.image`, best score first."""
+    usable = []
+    for method in methods if isinstance(methods, list) else []:
+        if not isinstance(method, dict) or method.get("status") != METHOD_OK:
+            continue
+        files = method.get("files") if isinstance(method.get("files"), dict) else {}
+        leads = _artifact(files.get("leads"), request_id)
+        image = _artifact(files.get("image"), request_id)
+        if _is_number(method.get("selector_score")) and leads and image:
+            usable.append({"id": method.get("method"), "score": method["selector_score"],
+                           "overlay": image, "signal": leads})
+    return sorted(usable, key=lambda variant: variant["score"], reverse=True)
+
+
+def reading_variants(reading):
+    """The reading's variants (one per `OK` method), best score first.
+
+    Readings stored before variants existed only keep the method summary; the artifacts of every
+    method share the chosen overlay's prefix (`reading/<request>/<run>/<method>/`), so they are rebuilt from it."""
+    if not reading:
+        return []
+    if isinstance(reading.get("variants"), list):
+        return reading["variants"]
+    overlay = (reading.get("artifacts") or {}).get("overlay")
+    if not overlay or reading.get("status") not in SUCCESS_STATUSES:
+        return []
+    parts = overlay["key"].split("/")
+    if len(parts) < 5:
+        return []
+    prefix = "/".join(parts[:-2]) + "/"
+    variants = []
+    for method in reading.get("methods") or []:
+        name = method.get("method") if isinstance(method, dict) else None
+        if method.get("status") != METHOD_OK or not _is_str(name) or not _is_number(method.get("selector_score")):
+            continue
+        variants.append({
+            "id": name,
+            "score": method["selector_score"],
+            "overlay": {"bucket": overlay["bucket"], "key": f"{prefix}{name}/preview.png"},
+            "signal": {"bucket": overlay["bucket"], "key": f"{prefix}{name}/leads.json"},
+        })
+    return sorted(variants, key=lambda variant: variant["score"], reverse=True)
+
+
+def choose_variant(attempt, variant_id):
+    """The user picked another variant on the check screen: it becomes the reading's overlay and signal.
+
+    Returns False if the id is not one of the reading's variants or its signal cannot be read."""
+    reading = attempt.reading or {}
+    variant = next((v for v in reading_variants(reading) if v["id"] == variant_id), None)
+    if variant is None:
+        return False
+    if (reading.get("method") or {}).get("name") == variant_id:
+        return True
+    try:
+        leads_doc = _read_json_from_s3(variant["signal"]["bucket"], variant["signal"]["key"])
+        leads = leads_doc.get("leads") if isinstance(leads_doc, dict) else None
+        if not isinstance(leads, list) or not all(isinstance(lead, dict) for lead in leads):
+            raise ValueError("leads.json has no lead list")
+    except Exception:
+        logger.exception("Failed to read leads.json of variant %s (attempt %s)", variant_id, attempt.id)
+        return False
+    previous = reading.get("method") or {}
+    reading["variants"] = reading_variants(reading)
+    reading["leads"] = [{k: lead.get(k) for k in ("name", "kind", "quality", "coverage")} for lead in leads]
+    reading["artifacts"] = {**(reading.get("artifacts") or {}), "overlay": variant["overlay"], "signal": variant["signal"]}
+    reading["method"] = {
+        "name": variant_id,
+        "version": next((m.get("version") for m in reading.get("methods") or []
+                         if isinstance(m, dict) and m.get("method") == variant_id), None),
+        "selector_score": variant["score"],
+        "sampling_rate_hz": leads_doc.get("sampling_rate_hz", previous.get("sampling_rate_hz")),
+        "chosen_by_user": True,
+    }
+    attempt.reading = reading
+    attempt.save(update_fields=["reading"])
+    return True
+
+
 def _refusal_preview(details, request_id):
     """Refusal preview: `details.preview` (old format) or the refusal image of the first method."""
     preview = _artifact(details.get("preview"), request_id)
@@ -464,6 +544,7 @@ def _read_success(envelope, reading, request_id):
         "sampling_rate_hz": method.get("sampling_rate_hz"),
     }
     reading["methods"] = _methods_summary(methods)
+    reading["variants"] = _usable_methods(methods, request_id)
     return reading
 
 
@@ -607,6 +688,11 @@ def attempt_reading_view(attempt, expires_in=None):
         "refusal_preview_url": _presign_artifact(artifacts.get("refusal_preview"), expires_in),
         "refusal_region_px": reading.get("refusal_region_px"),
         "leads": reading.get("leads") or [],
+        # Score is kept for ordering only; the app never shows it.
+        "variants": [
+            {"id": v["id"], "overlay_url": _presign_artifact(v["overlay"], expires_in), "score": v["score"]}
+            for v in reading_variants(reading)
+        ],
     }
 
 

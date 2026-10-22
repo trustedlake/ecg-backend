@@ -190,6 +190,15 @@ class AttemptAcceptView(AttemptActionView):
 
     def post(self, request, exam_id, attempt_id):
         attempt = self.get_attempt(request, exam_id, attempt_id)
+        variant_id = request.data.get("variant_id") if isinstance(request.data, dict) else None
+        if variant_id is not None:
+            if attempt.status != ExamStatus.AWAITING_VALIDATION:
+                return _invalid_state(attempt)
+            if not isinstance(variant_id, str) or not services.choose_variant(attempt, variant_id):
+                return Response(
+                    {"detail": "This reading option is not available.", "code": "invalid_variant"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         return self.start_phase(attempt, "interpret", ExamStatus.AWAITING_VALIDATION)
 
 

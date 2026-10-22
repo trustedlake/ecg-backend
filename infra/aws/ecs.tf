@@ -113,10 +113,12 @@ resource "aws_ecs_task_definition" "backend" {
           "CMD", "python", "-c",
           "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/', timeout=3)",
         ]
-        interval    = 30
-        timeout     = 5
+        # Short interval: the first successful check puts the task in Cloud Map (and ends the deploy wait);
+        # with interval 30 that took up to 30 s more. gunicorn boots in a few seconds.
+        interval    = 5
+        timeout     = 4
         retries     = 3
-        startPeriod = 60
+        startPeriod = 30
       }
       logConfiguration = local.log_configuration
     },

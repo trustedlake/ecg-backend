@@ -1,4 +1,4 @@
-# Pipeline Test stage: migrations up to date and Django tests (the lambdas are tested in ecg-lambdas-v1).
+# Pipeline Test action (runs in parallel with Build): migrations up to date and Django tests (the lambdas are tested in ecg-lambdas-v1).
 version: 0.2
 
 env:
@@ -7,6 +7,14 @@ env:
     PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 phases:
+  pre_build:
+    commands:
+      # Pre-warm: if RDS is stopped (deploy outside business hours), start it now so its ~6 min boot overlaps
+      # with the tests and the image build instead of delaying the Deploy stage. ci/deploy.sh waits for it.
+      - |
+        if [ -n "${DB_ID:-}" ] && [ "$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" --query 'DBInstances[0].DBInstanceStatus' --output text)" = "stopped" ]; then
+          aws rds start-db-instance --db-instance-identifier "$DB_ID" >/dev/null && echo "RDS $DB_ID was stopped; starting it for the deploy." || echo "Could not start RDS here; the Deploy stage will start it."
+        fi
   install:
     runtime-versions:
       python: 3.12
@@ -16,3 +24,7 @@ phases:
     commands:
       - python manage.py makemigrations --check --dry-run
       - python manage.py test
+
+cache:
+  paths:
+    - /root/.cache/pip/**/*

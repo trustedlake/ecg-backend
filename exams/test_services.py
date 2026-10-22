@@ -516,12 +516,42 @@ class AttemptViewsTest(ServicesTestCase):
         services.run_reading(self.attempt)
         view = services.attempt_reading_view(self.attempt)
         self.assertEqual(set(view), {"status", "warnings", "error", "overlay_url", "refusal_preview_url",
-                                     "refusal_region_px", "leads"})
+                                     "refusal_region_px", "leads", "variants"})
         self.assertEqual(view["overlay_url"], f"https://signed/{RESULTS}/reading/{self.rid}/run1/faint_ink/preview.png")
         self.assertIsNone(view["refusal_preview_url"])
         self.assertEqual(len(view["leads"]), 2)
         self.assertNotIn("samples", json.dumps(view))
         self.assertNotIn("https://", json.dumps(ExamAttempt.objects.get(id=self.attempt.id).reading))
+
+    def test_variants_are_the_ok_methods_best_first(self):
+        self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
+        services.run_reading(self.attempt)
+        variants = services.attempt_reading_view(self.attempt)["variants"]
+        self.assertEqual([(v["id"], v["score"]) for v in variants], [("faint_ink", 87.5), ("baseline_peaks", 70.0)])
+        self.assertEqual(variants[1]["overlay_url"],
+                         f"https://signed/{RESULTS}/reading/{self.rid}/run1/baseline_peaks/preview.png")
+
+    def test_variants_rebuilt_for_readings_stored_before_them(self):
+        self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
+        services.run_reading(self.attempt)
+        self._reload()
+        del self.attempt.reading["variants"]
+        variants = services.attempt_reading_view(self.attempt)["variants"]
+        self.assertEqual([v["id"] for v in variants], ["faint_ink", "baseline_peaks"])
+        self.assertEqual(variants[1]["overlay_url"],
+                         f"https://signed/{RESULTS}/reading/{self.rid}/run1/baseline_peaks/preview.png")
+
+    def test_choose_variant_switches_overlay_and_signal(self):
+        self._lambda_returns(_envelope("read", self.rid, "OK", result=_read_result(self.rid)))
+        services.run_reading(self.attempt)
+        self._reload()
+        self.assertTrue(services.choose_variant(self.attempt, "baseline_peaks"))
+        self._reload()
+        reading = self.attempt.reading
+        self.assertEqual(reading["method"]["name"], "baseline_peaks")
+        self.assertTrue(reading["artifacts"]["signal"]["key"].endswith("/baseline_peaks/leads.json"))
+        self.assertTrue(reading["artifacts"]["overlay"]["key"].endswith("/baseline_peaks/preview.png"))
+        self.assertFalse(services.choose_variant(self.attempt, "chromatic_ink"))
 
     def test_flags_for_user_rejection(self):
         self.attempt.status = ExamStatus.USER_REJECTED

@@ -81,6 +81,8 @@ Off-hours deploys (RDS stopped): 18-19 min before; RDS boot (~6 min) now overlap
 | Run | Total | TestAndBuild | Deploy | Cost |
 |---|---|---|---|---|
 | 2026-10-22 08:16 (PR #17, warm RDS, cold CodeBuild cache) | 6.3 min | Build 186 s (Test 62 s in parallel) | 186 s (one-off task 70 s, rollout + smoke 67 s) | ~US$0.073 |
+| 2026-10-22 08:23 (PR #19, warm RDS, warm cache) | 5.8 min | Build 155 s (Test 32 s in parallel) | 185 s | ~US$0.058 |
+| 2026-10-22 08:31 (PR #20, Node copy removed) | **4.8 min** | Build 93 s (Test 32 s in parallel) | 185 s | ~US$0.051 |
 
 ## 5. Rollout order
 
@@ -89,3 +91,5 @@ Off-hours deploys (RDS stopped): 18-19 min before; RDS boot (~6 min) now overlap
 2. Merge to `main`. A merge in this repo **or** in ecg-reader triggers a full deploy.
 3. The first deploy after merge runs `ci/deploy.sh` from the new commit, so it already includes the script changes; the new health-check settings land with the
    task-definition revision registered from the latest family revision (step 1 must be applied first).
+
+**Result:** 12.5-14.6 min -> 4.8 min per warm deploy (target 3-5 min met), ~US$0.11 -> ~US$0.05. The Build action spent ~46 s in `runtime-versions: nodejs 22` (`n` copies Node); `ci/buildspec-build.yml` now puts the preinstalled Node 22 on PATH. The remaining floor is Deploy (~3 min: one-off task ~70 s, new task provisioning + smoke ~67 s).

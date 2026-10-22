@@ -4,11 +4,13 @@
 version: 0.2
 
 phases:
-  install:
-    runtime-versions:
-      nodejs: 22
   pre_build:
     commands:
+      # The image ships Node 22 under /usr/local/n; `runtime-versions` copies it with `n` (~45 s). Use it in place.
+      - |
+        NODE_DIR="/usr/local/n/versions/node/$NODE_22_VERSION"
+        if [ -x "$NODE_DIR/bin/node" ]; then export PATH="$NODE_DIR/bin:$PATH"; else n "$NODE_22_VERSION"; fi
+        node -v
       - export IMAGE_TAG="$(echo "$BACKEND_SHA" | cut -c1-7)-$(echo "$FRONTEND_SHA" | cut -c1-7)"
       - echo "IMAGE_TAG=$IMAGE_TAG"
       - aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%%/*}"

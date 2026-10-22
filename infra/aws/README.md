@@ -2,7 +2,7 @@
 
 Terraform for the architecture in `docs/migration-plan-v1.md` §0. State in
 `s3://ecg-lambdas-terraform-state/ecg-backend-prod/terraform.tfstate` (`sa-east-1`).
-Buckets and lambdas are **not** managed here (stacks `ecg-lambdas` and `mock_lambdas/infra`).
+Buckets and lambdas are **not** managed here (they come from the `tl-gmiler/ecg-lambdas-v1` stacks: `ecg-reading`, `ecg-interpretation`).
 
 ## Prerequisites
 - Terraform >= 1.11 (write-only/ephemeral); provider `hashicorp/aws` ~> 6.69.

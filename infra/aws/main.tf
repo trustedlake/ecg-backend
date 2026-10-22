@@ -1,5 +1,5 @@
 # Production infra for the ECG backend (docs/migration-plan-v1.md §0, steps I1-I3).
-# This stack does NOT manage the buckets or the lambdas: they come from the ecg-lambdas and mock_lambdas stacks.
+# This stack does NOT manage the buckets or the lambdas: they come from the tl-gmiler/ecg-lambdas-v1 stacks (ecg-reading, ecg-interpretation).
 
 terraform {
   required_version = ">= 1.11"

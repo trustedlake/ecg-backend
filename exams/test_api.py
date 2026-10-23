@@ -141,7 +141,7 @@ class HappyPathTest(FlowTestCase):
         self.assertEqual(data["interpretation"]["disclaimer"], "Does not replace a physician's report.")
         self.assertEqual((data["can_retry"], data["needs_new_photo"]), (False, False))
         self.assertEqual(self.exam_status(), ExamStatus.COMPLETED)
-        self.assertEqual(self.calls[1][1]["patient"], {"sex": "F"})
+        self.assertEqual(self.calls[1][1]["patient"], {"sex": "F", "age_years": 30})
         # leads.json goes as signal, with the chosen method's sample rate (contract 2.0 §4).
         self.assertEqual(self.calls[1][1]["signal"], {**SIGNAL, "sampling_rate_hz": 150.0, "units": "mV"})
 

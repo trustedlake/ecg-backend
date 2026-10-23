@@ -632,7 +632,7 @@ def run_interpretation(attempt):
             payload = {
                 "contract_version": CONTRACT_VERSION,
                 "request_id": request_id,
-                "patient": {"sex": sex},
+                "patient": {"sex": sex, "age_years": attempt.exam.patient.age},
                 "signal": signal,
             }
             mock = (attempt.test_scenario or {}).get("interpret")

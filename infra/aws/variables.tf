@@ -1,6 +1,6 @@
 variable "region" {
   type    = string
-  default = "sa-east-1"
+  default = "us-east-1"
 }
 
 variable "aws_profile" {
@@ -17,13 +17,13 @@ variable "vpc_cidr" {
 variable "images_bucket" {
   type        = string
   description = "Bucket (existente, stack ecg-lambdas) onde o app sobe as fotos."
-  default     = "ecg-lambdas-images-785236377332-sa-east-1"
+  default     = "ecg-lambdas-images-785236377332-us-east-1"
 }
 
 variable "results_bucket" {
   type        = string
   description = "Bucket (existing, ecg-lambdas stack) with overlay, refusal preview and signal."
-  default     = "ecg-lambdas-results-785236377332-sa-east-1"
+  default     = "ecg-lambdas-results-785236377332-us-east-1"
 }
 
 variable "reading_lambda_name" {

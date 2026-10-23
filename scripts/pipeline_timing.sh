@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Per-action timing and estimated cost of the latest successful ecg-backend pipeline executions.
 # Usage: scripts/pipeline_timing.sh [N=8]   (needs the aws CLI and python3; region/profile from the environment)
-# Prices (sa-east-1, on demand): CodeBuild ARM small US$0.00525/min (billed per started minute),
+# Prices (sa-east-1 on-demand, measured before the move to us-east-1; us-east-1 is cheaper, re-check): CodeBuild ARM small US$0.00525/min (billed per started minute),
 # CodePipeline V2 US$0.002/action-minute. Fargate one-off tasks and the overlapping service task are not included
 # (US$0.000566/min each for 0.5 vCPU / 1 GB: Fargate ARM US$0.0557/vCPU-h + US$0.00612/GB-h).
 set -euo pipefail

@@ -13,9 +13,9 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "ecg-lambdas-terraform-state"
+    bucket = "ecg-terraform-state-785236377332-us-east-1"
     key    = "ecg-backend-prod/terraform.tfstate"
-    region = "sa-east-1"
+    region = "us-east-1"
   }
 }
 

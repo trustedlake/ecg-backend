@@ -40,7 +40,7 @@ resource "aws_codestarconnections_connection" "github_frontend" {
 # --- Bucket de artefatos ---
 
 resource "aws_s3_bucket" "pipeline" {
-  bucket = "ecg-backend-pipeline-${local.account_id}"
+  bucket = "ecg-backend-pipeline-${local.account_id}-${var.region}"
 }
 
 resource "aws_s3_bucket_public_access_block" "pipeline" {
@@ -198,7 +198,7 @@ locals {
 
 resource "aws_iam_role" "codebuild" {
   for_each           = local.codebuild_stages
-  name               = "ecg-codebuild-${each.key}"
+  name               = "ecg-codebuild-${each.key}-${var.region}"
   assume_role_policy = data.aws_iam_policy_document.codebuild_assume.json
 }
 
@@ -317,7 +317,7 @@ data "aws_iam_policy_document" "codepipeline_assume" {
 }
 
 resource "aws_iam_role" "codepipeline" {
-  name               = "ecg-codepipeline"
+  name               = "ecg-codepipeline-${var.region}"
   assume_role_policy = data.aws_iam_policy_document.codepipeline_assume.json
 }
 

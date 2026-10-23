@@ -1,7 +1,7 @@
 # infra/aws: ECG backend production
 
 Terraform for the architecture in `docs/migration-plan-v1.md` §0. State in
-`s3://ecg-lambdas-terraform-state/ecg-backend-prod/terraform.tfstate` (`sa-east-1`).
+`s3://ecg-terraform-state-785236377332-us-east-1/ecg-backend-prod/terraform.tfstate` (`us-east-1`; the old sa-east-1 state stays in `ecg-lambdas-terraform-state` until the stack is destroyed).
 Buckets and lambdas are **not** managed here (stacks `ecg-lambdas` and `mock_lambdas/infra`).
 
 ## Prerequisites
@@ -17,7 +17,7 @@ Buckets and lambdas are **not** managed here (stacks `ecg-lambdas` and `mock_lam
   | `/ecg/prod/ADMIN_PASSWORD` | that superuser's password |
 
   ```sh
-  aws ssm put-parameter --region sa-east-1 --type SecureString --name /ecg/prod/DB_PASSWORD --value '<password>'
+  aws ssm put-parameter --region us-east-1 --type SecureString --name /ecg/prod/DB_PASSWORD --value '<password>'
   ```
   The RDS password cannot contain `/`, `@`, `"` or spaces.
 
@@ -80,3 +80,22 @@ A pipeline failure sends an email through the SNS topic `ecg-alerts`.
 ## First deploy
 The service and autoscaling start with 0 tasks, because the `bootstrap` image does not exist in ECR. The first
 pipeline run creates the image and the revision and starts the task (or the 08:00 action starts it the next day).
+
+## Region: us-east-1 (moved from sa-east-1 on 2026-10-23)
+The whole platform runs in `us-east-1` (the competition is evaluated there), with a new empty database and empty buckets.
+
+| Item | Value |
+|---|---|
+| API URL | `https://7y0j5a8yte.execute-api.us-east-1.amazonaws.com` |
+| Terraform state bucket | `ecg-terraform-state-785236377332-us-east-1` (versioned, encrypted) |
+| State keys | `ecg-backend-prod/terraform.tfstate` (this stack), `prod/terraform.tfstate` (`ecg-lambdas`, buckets only), `ecg-mock-lambdas/terraform.tfstate` (`ecg-lambdas-v1/mock_lambdas`, Lambdas `ecg-reading` and `ecg-interpretation`) |
+| Buckets | `ecg-lambdas-images-785236377332-us-east-1`, `ecg-lambdas-results-785236377332-us-east-1` |
+| Reading image | ECR `ecg-analyser:v6-quiet` (created by hand; copied from sa-east-1 with a one-off CodeBuild pull/tag/push) |
+| Budget | `ecg-prod-monthly-us-east-1` (budget names are account-global) |
+
+Names that are global in the account carry the region suffix (IAM roles `ecg-*-us-east-1`, pipeline artifact bucket
+`ecg-backend-pipeline-<account>-us-east-1`, budget) so that the old sa-east-1 stack can coexist until it is destroyed.
+The CodeStar connections (`ecg-github`, `ecg-github-frontend`) are regional and must be authorized in the console of this region.
+
+The old sa-east-1 stack is **stopped, not destroyed**: state in `s3://ecg-lambdas-terraform-state` (keys `ecg-backend-prod/`,
+`ecg-mock-lambdas/`, `prod/`), ECS at 0 tasks, RDS stopped (AWS restarts a stopped RDS after 7 days), pipeline disabled.

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 export AWS_PROFILE="${AWS_PROFILE:-trustedlake}"
-export AWS_REGION="${AWS_REGION:-sa-east-1}"
+export AWS_REGION="${AWS_REGION:-us-east-1}"
 DB_ID="${DB_ID:-ecg}"
 CLUSTER="${CLUSTER:-ecg}"
 SERVICE="${SERVICE:-ecg-backend}"

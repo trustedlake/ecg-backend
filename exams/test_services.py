@@ -217,7 +217,7 @@ class RunReadingTest(ServicesTestCase):
                                              "selector_score": 87.5, "sampling_rate_hz": 150.0})
         self.assertEqual([m["method"] for m in reading["methods"]][:3],
                          ["baseline_peaks", "chromatic_ink", "faint_ink"])
-        self.assertEqual(reading["leads"][1], {"name": "V2", "kind": "panel", "quality": "partial", "coverage": 0.6})
+        self.assertEqual(reading["leads"][1], {"name": "V2", "kind": "panel", "quality": "partial", "coverage": 0.6, "signal_source": None})
         self.assertNotIn("samples", json.dumps(reading))
 
     def test_payload_follows_contract_without_mock(self):

@@ -127,7 +127,7 @@ class HappyPathTest(FlowTestCase):
         self.assertEqual(data["calibration"], {"speed_mm_s": 25, "gain_mm_mv": 10})
         self.assertEqual(data["reading"]["overlay_url"],
                          f"https://signed/reading/{aid}/run1/baseline_peaks/preview.png")
-        self.assertEqual(data["reading"]["leads"], [{"name": "II", "kind": "rhythm", "quality": "good", "coverage": 1.0}])
+        self.assertEqual(data["reading"]["leads"], [{"name": "II", "kind": "rhythm", "quality": "good", "coverage": 1.0, "signal_source": None}])
         self.assertTrue(data["original_image_url"].startswith("https://signed/"))
         self.assertIsNone(data["interpretation"])
         self.assertNotIn("samples", json.dumps(data))

@@ -90,7 +90,8 @@ The whole platform runs in `us-east-1` (the competition is evaluated there), wit
 | Terraform state bucket | `ecg-terraform-state-785236377332-us-east-1` (versioned, encrypted) |
 | State keys | `ecg-backend-prod/terraform.tfstate` (this stack), `prod/terraform.tfstate` (`ecg-lambdas`, buckets only), `ecg-mock-lambdas/terraform.tfstate` (`ecg-lambdas-v1/mock_lambdas`, Lambdas `ecg-reading` and `ecg-interpretation`) |
 | Buckets | `ecg-lambdas-images-785236377332-us-east-1`, `ecg-lambdas-results-785236377332-us-east-1` |
-| Reading image | ECR `ecg-analyser:v6-quiet` (created by hand; copied from sa-east-1 with a one-off CodeBuild pull/tag/push) |
+| Reading image | ECR `ecg-analyser`, deployed by the Lambdas pipeline (tag = commit sha7). `v6-quiet` was copied from sa-east-1 with a one-off CodeBuild pull/tag/push; `v7-traced-fallback` and `v8-tips` were pushed by hand |
+| Models bucket | `ecg-lambdas-models-785236377332-us-east-1` (versioned, **created by hand**; holds `model_selector.pkl`) |
 | Budget | `ecg-prod-monthly-us-east-1` (budget names are account-global) |
 
 Names that are global in the account carry the region suffix (IAM roles `ecg-*-us-east-1`, pipeline artifact bucket
@@ -99,6 +100,14 @@ The CodeStar connections (`ecg-github`, `ecg-github-frontend`) are regional and 
 
 The old sa-east-1 stack is **stopped, not destroyed**: state in `s3://ecg-lambdas-terraform-state` (keys `ecg-backend-prod/`,
 `ecg-mock-lambdas/`, `prod/`), ECS at 0 tasks, RDS stopped (AWS restarts a stopped RDS after 7 days), pipeline disabled.
+
+### Lambdas pipeline (`ecg-lambdas`, us-east-1)
+Code of `ecg-reading` and `ecg-interpretation` is deployed by CodePipeline `ecg-lambdas`, defined in
+`ecg-lambdas-v1/mock_lambdas/infra`. Source is `tl-gmiler/ecg-lambdas-v1` on `main` (connection `ecg-github`); Test and Build
+run in parallel, then Deploy updates both functions, sets `CODE_VERSION` and runs `smoke_aws.py`. If the smoke test fails
+the previous code is restored. There is no manual approval. Failures reach `ecg-alerts` through the EventBridge rule
+`ecg-lambdas-pipeline-failed`; this stack's SNS topic policy (`monitoring.tf`) allows that rule to publish.
+Details are in the `ecg-lambdas-v1` README (`mock_lambdas/README.md`).
 
 ### sa-east-1 shutdown state (2026-10-23)
 - ECS service `ecg-backend`: desired 0, autoscaling min/max 0, scheduled scaling suspended.

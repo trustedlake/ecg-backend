@@ -12,7 +12,7 @@ from django.test import SimpleTestCase, override_settings
 from exams.management.commands import ecg_worker
 from exams.management.commands.ecg_worker import Worker, parse_body
 
-QUEUE = "https://sqs.sa-east-1.amazonaws.com/123/ecg-tasks"
+QUEUE = "https://sqs.us-east-1.amazonaws.com/123/ecg-tasks"
 
 
 def msg(body, handle="rh-1"):

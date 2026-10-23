@@ -1,7 +1,7 @@
 # infra/aws: ECG backend production
 
 Terraform for the architecture in `docs/migration-plan-v1.md` §0. State in
-`s3://ecg-lambdas-terraform-state/ecg-backend-prod/terraform.tfstate` (`sa-east-1`).
+`s3://ecg-terraform-state-785236377332-us-east-1/ecg-backend-prod/terraform.tfstate` (`us-east-1`; the old sa-east-1 state stays in `ecg-lambdas-terraform-state` until the stack is destroyed).
 Buckets and lambdas are **not** managed here (stacks `ecg-lambdas` and `mock_lambdas/infra`).
 
 ## Prerequisites
@@ -17,7 +17,7 @@ Buckets and lambdas are **not** managed here (stacks `ecg-lambdas` and `mock_lam
   | `/ecg/prod/ADMIN_PASSWORD` | that superuser's password |
 
   ```sh
-  aws ssm put-parameter --region sa-east-1 --type SecureString --name /ecg/prod/DB_PASSWORD --value '<password>'
+  aws ssm put-parameter --region us-east-1 --type SecureString --name /ecg/prod/DB_PASSWORD --value '<password>'
   ```
   The RDS password cannot contain `/`, `@`, `"` or spaces.
 

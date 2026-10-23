@@ -381,7 +381,7 @@ class ConfigHealthLoginTest(APITestCase):
         self.assertEqual(resp.data["user"]["username"], "doctor")
 
 
-@override_settings(ECG_TASK_MODE="sqs", ECG_TASK_QUEUE_URL="https://sqs.sa-east-1.amazonaws.com/1/ecg-tasks")
+@override_settings(ECG_TASK_MODE="sqs", ECG_TASK_QUEUE_URL="https://sqs.us-east-1.amazonaws.com/1/ecg-tasks")
 class SqsDispatchTest(FlowTestCase):
     def setUp(self):
         super().setUp()
@@ -396,7 +396,7 @@ class SqsDispatchTest(FlowTestCase):
         self.assertEqual(resp.status_code, 202)
         self.assertEqual(resp.data["status"], ExamStatus.READING)
         self.sqs.send_message.assert_called_once_with(
-            QueueUrl="https://sqs.sa-east-1.amazonaws.com/1/ecg-tasks",
+            QueueUrl="https://sqs.us-east-1.amazonaws.com/1/ecg-tasks",
             MessageBody=json.dumps({"ecg_task": "read", "attempt_id": aid}),
         )
         self.assertEqual(self.calls, [])

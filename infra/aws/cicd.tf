@@ -520,7 +520,11 @@ data "aws_iam_policy_document" "alerts_topic" {
     condition {
       test     = "ArnEquals"
       variable = "aws:SourceArn"
-      values   = [aws_cloudwatch_event_rule.pipeline_failed.arn]
+      values = [
+        aws_cloudwatch_event_rule.pipeline_failed.arn,
+        # Failure rule of the lambdas pipeline (ecg-lambdas-v1/mock_lambdas/infra/cicd.tf), another stack.
+        "arn:aws:events:${var.region}:${local.account_id}:rule/ecg-lambdas-pipeline-failed",
+      ]
     }
   }
 

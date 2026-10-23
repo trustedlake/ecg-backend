@@ -99,3 +99,16 @@ The CodeStar connections (`ecg-github`, `ecg-github-frontend`) are regional and 
 
 The old sa-east-1 stack is **stopped, not destroyed**: state in `s3://ecg-lambdas-terraform-state` (keys `ecg-backend-prod/`,
 `ecg-mock-lambdas/`, `prod/`), ECS at 0 tasks, RDS stopped (AWS restarts a stopped RDS after 7 days), pipeline disabled.
+
+### sa-east-1 shutdown state (2026-10-23)
+- ECS service `ecg-backend`: desired 0, autoscaling min/max 0, scheduled scaling suspended.
+- RDS `ecg`: `stopped`; the `ecg-rds-start`/`ecg-rds-stop` schedules are DISABLED. **AWS restarts it on 2026-10-30**: destroy
+  the stack before that date or stop it again.
+- Pipeline `ecg-backend` (sa-east-1): the transition into `TestAndBuild` is disabled, so merges do not deploy there.
+- `aws_ce_cost_allocation_tag.project` is account-global: run `terraform state rm` on it in the old state before `destroy`.
+
+### Validation in us-east-1 (2026-10-23)
+`/api/health/` ok (db ok), `/` serves the HTML, admin login works, the presigned PUT goes to the new images bucket, the worker
+reads from the new queue and `ecg-reading` writes to the new results bucket, `ecg-interpretation` returns `OK_WITH_WARNINGS`.
+The sample image is refused by the reading (`READ_REFUSED_UNREADABLE_TRACE`), so the 6-method view still needs a real ECG photo.
+Alarms: 9/10 OK; `ecg-rds-cpu-credits` stays in ALARM for a few hours until the new RDS earns credits.

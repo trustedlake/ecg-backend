@@ -127,7 +127,7 @@ class HappyPathTest(FlowTestCase):
         self.assertEqual(data["calibration"], {"speed_mm_s": 25, "gain_mm_mv": 10})
         self.assertEqual(data["reading"]["overlay_url"],
                          f"https://signed/reading/{aid}/run1/baseline_peaks/preview.png")
-        self.assertEqual(data["reading"]["leads"], [{"name": "II", "kind": "rhythm", "quality": "good", "coverage": 1.0}])
+        self.assertEqual(data["reading"]["leads"], [{"name": "II", "kind": "rhythm", "quality": "good", "coverage": 1.0, "signal_source": None}])
         self.assertTrue(data["original_image_url"].startswith("https://signed/"))
         self.assertIsNone(data["interpretation"])
         self.assertNotIn("samples", json.dumps(data))
@@ -141,7 +141,7 @@ class HappyPathTest(FlowTestCase):
         self.assertEqual(data["interpretation"]["disclaimer"], "Does not replace a physician's report.")
         self.assertEqual((data["can_retry"], data["needs_new_photo"]), (False, False))
         self.assertEqual(self.exam_status(), ExamStatus.COMPLETED)
-        self.assertEqual(self.calls[1][1]["patient"], {"sex": "F"})
+        self.assertEqual(self.calls[1][1]["patient"], {"sex": "F", "age_years": 30})
         # leads.json goes as signal, with the chosen method's sample rate (contract 2.0 §4).
         self.assertEqual(self.calls[1][1]["signal"], {**SIGNAL, "sampling_rate_hz": 150.0, "units": "mV"})
 
@@ -381,7 +381,7 @@ class ConfigHealthLoginTest(APITestCase):
         self.assertEqual(resp.data["user"]["username"], "doctor")
 
 
-@override_settings(ECG_TASK_MODE="sqs", ECG_TASK_QUEUE_URL="https://sqs.sa-east-1.amazonaws.com/1/ecg-tasks")
+@override_settings(ECG_TASK_MODE="sqs", ECG_TASK_QUEUE_URL="https://sqs.us-east-1.amazonaws.com/1/ecg-tasks")
 class SqsDispatchTest(FlowTestCase):
     def setUp(self):
         super().setUp()
@@ -396,7 +396,7 @@ class SqsDispatchTest(FlowTestCase):
         self.assertEqual(resp.status_code, 202)
         self.assertEqual(resp.data["status"], ExamStatus.READING)
         self.sqs.send_message.assert_called_once_with(
-            QueueUrl="https://sqs.sa-east-1.amazonaws.com/1/ecg-tasks",
+            QueueUrl="https://sqs.us-east-1.amazonaws.com/1/ecg-tasks",
             MessageBody=json.dumps({"ecg_task": "read", "attempt_id": aid}),
         )
         self.assertEqual(self.calls, [])

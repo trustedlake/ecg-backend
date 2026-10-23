@@ -15,7 +15,7 @@ The lambda contract lives in [tl-gmiler/ecg-lambdas-v1](https://github.com/tl-gm
 
 Test scenarios (`success`, `success_with_warnings`, `refused`, `failure`) only work for staff users and with `ECG_TEST_SCENARIOS_ENABLED=true`.
 
-## Production (AWS, sa-east-1)
+## Production (AWS, us-east-1)
 
 - ECS Fargate (ARM) runs one task with two containers: `web` (gunicorn + WhiteNoise, serving `/api`, `/admin` and the Expo web export) and `worker` (`manage.py ecg_worker`, consuming SQS).
 - API Gateway HTTP API → VPC Link → Cloud Map → ECS. No CloudFront, no load balancer.

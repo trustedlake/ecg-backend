@@ -488,7 +488,7 @@ def choose_variant(attempt, variant_id):
         return False
     previous = reading.get("method") or {}
     reading["variants"] = reading_variants(reading)
-    reading["leads"] = [{k: lead.get(k) for k in ("name", "kind", "quality", "coverage")} for lead in leads]
+    reading["leads"] = [{k: lead.get(k) for k in ("name", "kind", "quality", "coverage", "signal_source")} for lead in leads]
     reading["artifacts"] = {**(reading.get("artifacts") or {}), "overlay": variant["overlay"], "signal": variant["signal"]}
     reading["method"] = {
         "name": variant_id,
@@ -541,7 +541,7 @@ def _read_success(envelope, reading, request_id):
         warnings = [dict(METHODS_PARTIAL_WARNING)]
     reading["warnings"] = warnings
     # Per-lead summary WITHOUT `samples`: the signal stays only in S3 (artifacts.signal).
-    reading["leads"] = [{k: lead.get(k) for k in ("name", "kind", "quality", "coverage")} for lead in leads]
+    reading["leads"] = [{k: lead.get(k) for k in ("name", "kind", "quality", "coverage", "signal_source")} for lead in leads]
     reading["artifacts"]["overlay"] = image_ref
     reading["artifacts"]["signal"] = leads_ref
     reading["method"] = {
@@ -632,7 +632,7 @@ def run_interpretation(attempt):
             payload = {
                 "contract_version": CONTRACT_VERSION,
                 "request_id": request_id,
-                "patient": {"sex": sex},
+                "patient": {"sex": sex, "age_years": attempt.exam.patient.age},
                 "signal": signal,
             }
             mock = (attempt.test_scenario or {}).get("interpret")

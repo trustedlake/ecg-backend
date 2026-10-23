@@ -153,7 +153,7 @@ resource "aws_ce_cost_allocation_tag" "project" {
 }
 
 resource "aws_budgets_budget" "monthly" {
-  name         = "ecg-prod-monthly"
+  name         = "ecg-prod-monthly-${var.region}"
   budget_type  = "COST"
   limit_amount = tostring(var.monthly_budget_usd)
   limit_unit   = "USD"

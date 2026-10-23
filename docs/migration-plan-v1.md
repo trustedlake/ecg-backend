@@ -1,5 +1,8 @@
 # Execution plan: front/back/infra migration to Expo Go + AWS CI/CD (V1)
 
+> **Region note (2026-10-23):** this plan was written and first executed in `sa-east-1`. The platform now runs in
+> `us-east-1`; the `sa-east-1` references below are historical. Current names are in `infra/aws/README.md`.
+
 > Written on 2026-10-15 to be executed **step by step** (e.g. with Sonnet 5.5). Each step is a self-contained
 > prompt: copy the whole "Prompt" block into a new session. Wait for one step's report before running the
 > next (the steps depend on what was actually implemented, not on what was planned).

@@ -41,7 +41,7 @@ if not DEBUG and not env("DJANGO_SECRET_KEY", default="").strip():
     raise ImproperlyConfigured("Set DJANGO_SECRET_KEY in production")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
-# Trusted HTTPS origins for the admin (e.g. https://<api-id>.execute-api.sa-east-1.amazonaws.com).
+# Trusted HTTPS origins for the admin (e.g. https://<api-id>.execute-api.us-east-1.amazonaws.com).
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 # Behind API Gateway (HTTPS at the edge; the hop to the container is HTTP inside the VPC).
@@ -195,6 +195,9 @@ STORAGES = {
 FRONTEND_DIST = BASE_DIR / "frontend_dist"
 WHITENOISE_ROOT = FRONTEND_DIST if FRONTEND_DIST.is_dir() else None
 
+# /phone.html embeds the app in an iframe on the same origin; other sites stay blocked.
+X_FRAME_OPTIONS = "SAMEORIGIN"
+
 # Logging: everything to stdout (CloudWatch Logs via awslogs), one line per event.
 LOG_LEVEL = env("LOG_LEVEL", default="INFO")
 LOGGING = {
@@ -245,15 +248,15 @@ REST_FRAMEWORK['NUM_PROXIES'] = 1
 # Local: boto3 uses the default credential chain; for dev, export
 # AWS_PROFILE=trustedlake (profile with access to account 785236377332). In
 # production this becomes the instance IAM role (Terraform phase).
-AWS_REGION = env("AWS_REGION", default="sa-east-1")
+AWS_REGION = env("AWS_REGION", default="us-east-1")
 AWS_PROFILE_NAME = env("AWS_PROFILE", default=None)
 AWS_IMAGES_BUCKET = env(
     "AWS_IMAGES_BUCKET",
-    default="ecg-lambdas-images-785236377332-sa-east-1",
+    default="ecg-lambdas-images-785236377332-us-east-1",
 )
 AWS_RESULTS_BUCKET = env(
     "AWS_RESULTS_BUCKET",
-    default="ecg-lambdas-results-785236377332-sa-east-1",
+    default="ecg-lambdas-results-785236377332-us-east-1",
 )
 # Contract lambdas (tl-gmiler/ecg-lambdas-v1, lambda contract): real reading 2.0 and
 # mock interpretation. Test scenarios are the payload `mock` field, on the same functions.

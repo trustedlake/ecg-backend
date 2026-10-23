@@ -1,7 +1,7 @@
 # infra/aws: ECG backend production
 
 Terraform for the architecture in `docs/migration-plan-v1.md` §0. State in
-`s3://ecg-lambdas-terraform-state/ecg-backend-prod/terraform.tfstate` (`sa-east-1`).
+`s3://ecg-terraform-state-785236377332-us-east-1/ecg-backend-prod/terraform.tfstate` (`us-east-1`; the old sa-east-1 state stays in `ecg-lambdas-terraform-state` until the stack is destroyed).
 Buckets and lambdas are **not** managed here (they come from the `tl-gmiler/ecg-lambdas-v1` stacks: `ecg-reading`, `ecg-interpretation`).
 
 ## Prerequisites
@@ -17,7 +17,7 @@ Buckets and lambdas are **not** managed here (they come from the `tl-gmiler/ecg-
   | `/ecg/prod/ADMIN_PASSWORD` | that superuser's password |
 
   ```sh
-  aws ssm put-parameter --region sa-east-1 --type SecureString --name /ecg/prod/DB_PASSWORD --value '<password>'
+  aws ssm put-parameter --region us-east-1 --type SecureString --name /ecg/prod/DB_PASSWORD --value '<password>'
   ```
   The RDS password cannot contain `/`, `@`, `"` or spaces.
 
@@ -80,3 +80,44 @@ A pipeline failure sends an email through the SNS topic `ecg-alerts`.
 ## First deploy
 The service and autoscaling start with 0 tasks, because the `bootstrap` image does not exist in ECR. The first
 pipeline run creates the image and the revision and starts the task (or the 08:00 action starts it the next day).
+
+## Region: us-east-1 (moved from sa-east-1 on 2026-10-23)
+The whole platform runs in `us-east-1` (the competition is evaluated there), with a new empty database and empty buckets.
+
+| Item | Value |
+|---|---|
+| API URL | `https://7y0j5a8yte.execute-api.us-east-1.amazonaws.com` |
+| Terraform state bucket | `ecg-terraform-state-785236377332-us-east-1` (versioned, encrypted) |
+| State keys | `ecg-backend-prod/terraform.tfstate` (this stack), `prod/terraform.tfstate` (`ecg-lambdas`, buckets only), `ecg-mock-lambdas/terraform.tfstate` (`ecg-lambdas-v1/mock_lambdas`, Lambdas `ecg-reading` and `ecg-interpretation`) |
+| Buckets | `ecg-lambdas-images-785236377332-us-east-1`, `ecg-lambdas-results-785236377332-us-east-1` |
+| Reading image | ECR `ecg-analyser`, deployed by the Lambdas pipeline (tag = commit sha7). `v6-quiet` was copied from sa-east-1 with a one-off CodeBuild pull/tag/push; `v7-traced-fallback` and `v8-tips` were pushed by hand |
+| Models bucket | `ecg-lambdas-models-785236377332-us-east-1` (versioned, **created by hand**; holds `model_selector.pkl`) |
+| Budget | `ecg-prod-monthly-us-east-1` (budget names are account-global) |
+
+Names that are global in the account carry the region suffix (IAM roles `ecg-*-us-east-1`, pipeline artifact bucket
+`ecg-backend-pipeline-<account>-us-east-1`, budget) so that the old sa-east-1 stack can coexist until it is destroyed.
+The CodeStar connections (`ecg-github`, `ecg-github-frontend`) are regional and must be authorized in the console of this region.
+
+The old sa-east-1 stack is **stopped, not destroyed**: state in `s3://ecg-lambdas-terraform-state` (keys `ecg-backend-prod/`,
+`ecg-mock-lambdas/`, `prod/`), ECS at 0 tasks, RDS stopped (AWS restarts a stopped RDS after 7 days), pipeline disabled.
+
+### Lambdas pipeline (`ecg-lambdas`, us-east-1)
+Code of `ecg-reading` and `ecg-interpretation` is deployed by CodePipeline `ecg-lambdas`, defined in
+`ecg-lambdas-v1/mock_lambdas/infra`. Source is `tl-gmiler/ecg-lambdas-v1` on `main` (connection `ecg-github`); Test and Build
+run in parallel, then Deploy updates both functions, sets `CODE_VERSION` and runs `smoke_aws.py`. If the smoke test fails
+the previous code is restored. There is no manual approval. Failures reach `ecg-alerts` through the EventBridge rule
+`ecg-lambdas-pipeline-failed`; this stack's SNS topic policy (`monitoring.tf`) allows that rule to publish.
+Details are in the `ecg-lambdas-v1` README (`mock_lambdas/README.md`).
+
+### sa-east-1 shutdown state (2026-10-23)
+- ECS service `ecg-backend`: desired 0, autoscaling min/max 0, scheduled scaling suspended.
+- RDS `ecg`: `stopped`; the `ecg-rds-start`/`ecg-rds-stop` schedules are DISABLED. **AWS restarts it on 2026-10-30**: destroy
+  the stack before that date or stop it again.
+- Pipeline `ecg-backend` (sa-east-1): the transition into `TestAndBuild` is disabled, so merges do not deploy there.
+- `aws_ce_cost_allocation_tag.project` is account-global: run `terraform state rm` on it in the old state before `destroy`.
+
+### Validation in us-east-1 (2026-10-23)
+`/api/health/` ok (db ok), `/` serves the HTML, admin login works, the presigned PUT goes to the new images bucket, the worker
+reads from the new queue and `ecg-reading` writes to the new results bucket, `ecg-interpretation` returns `OK_WITH_WARNINGS`.
+The sample image is refused by the reading (`READ_REFUSED_UNREADABLE_TRACE`), so the 6-method view still needs a real ECG photo.
+Alarms: 9/10 OK; `ecg-rds-cpu-credits` stays in ALARM for a few hours until the new RDS earns credits.

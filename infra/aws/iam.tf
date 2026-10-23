@@ -18,7 +18,7 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
 # --- Execution role: puxa a imagem, escreve logs e injeta os segredos do SSM ---
 
 resource "aws_iam_role" "ecs_execution" {
-  name               = "ecg-ecs-execution"
+  name               = "ecg-ecs-execution-${var.region}"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
@@ -59,7 +59,7 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
 # --- Task role: what Django (web and worker) calls on AWS ---
 
 resource "aws_iam_role" "ecs_task" {
-  name               = "ecg-ecs-task"
+  name               = "ecg-ecs-task-${var.region}"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 

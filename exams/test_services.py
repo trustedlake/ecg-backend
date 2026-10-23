@@ -217,7 +217,7 @@ class RunReadingTest(ServicesTestCase):
                                              "selector_score": 87.5, "sampling_rate_hz": 150.0})
         self.assertEqual([m["method"] for m in reading["methods"]][:3],
                          ["baseline_peaks", "chromatic_ink", "faint_ink"])
-        self.assertEqual(reading["leads"][1], {"name": "V2", "kind": "panel", "quality": "partial", "coverage": 0.6})
+        self.assertEqual(reading["leads"][1], {"name": "V2", "kind": "panel", "quality": "partial", "coverage": 0.6, "signal_source": None})
         self.assertNotIn("samples", json.dumps(reading))
 
     def test_payload_follows_contract_without_mock(self):
@@ -424,7 +424,7 @@ class RunInterpretationTest(ServicesTestCase):
         # leads.json + the chosen method's sample rate (contract 2.0 §4).
         self.assertEqual(payload["signal"], {**SIGNAL, "sampling_rate_hz": 150.0, "units": "mV"})
         self.assertNotIn("sampling_rate_hz", SIGNAL)
-        self.assertEqual(payload["patient"], {"sex": "F"})
+        self.assertEqual(payload["patient"], {"sex": "F", "age_years": 30})
         self.assertNotIn("mock", payload)
         self.assertEqual(self.client_mock.invoke.call_args.kwargs["FunctionName"],
                          settings.AWS_LAMBDA_ECG_INTERPRETATION)
@@ -443,7 +443,7 @@ class RunInterpretationTest(ServicesTestCase):
         self._lambda_returns(_envelope("interpret", self.rid, "OK", result=INTERP_RESULT))
         services.run_interpretation(attempt)
         payload = self._sent_payload()
-        self.assertEqual(payload["patient"], {"sex": "M"})
+        self.assertEqual(payload["patient"], {"sex": "M", "age_years": 30})
         self.assertEqual(payload["mock"], {"scenario": "success_with_warnings"})
 
     def test_ok_with_warnings_goes_to_report(self):

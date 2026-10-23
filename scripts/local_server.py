@@ -53,7 +53,7 @@ os.environ.setdefault("ALLOWED_HOSTS", "127.0.0.1,localhost")
 os.environ.setdefault("CORS_ALLOWED_ORIGINS", "http://localhost:8081,http://127.0.0.1:8081")
 os.environ["ECG_TASK_MODE"] = "inline"
 os.environ.setdefault("ECG_TEST_SCENARIOS_ENABLED", "True")
-os.environ.setdefault("RESULTS_BUCKET", "ecg-lambdas-results-785236377332-sa-east-1")
+os.environ.setdefault("RESULTS_BUCKET", "ecg-lambdas-results-785236377332-us-east-1")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 sys.path[:0] = [str(ROOT), str(HERE), str(LAMBDAS)]
 S3_DIR.mkdir(parents=True, exist_ok=True)

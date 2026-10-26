@@ -1,5 +1,5 @@
 # Single-AZ PostgreSQL. The password comes from SSM through an ephemeral resource and goes into password_wo:
-# it is never in the plan or the state. Outside business hours the database is stopped by the Scheduler (I2).
+# it is never in the plan or the state. The database runs continuously.
 
 ephemeral "aws_ssm_parameter" "db_password" {
   arn             = "arn:aws:ssm:${var.region}:${local.account_id}:parameter${var.ssm_prefix}/DB_PASSWORD"

@@ -59,7 +59,7 @@ variable "db_password_version" {
   default     = 1
 }
 
-# --- I2: ECS, API Gateway, schedule and monitoring ---
+# --- I2: ECS, API Gateway and monitoring ---
 
 variable "image_tag" {
   type        = string
@@ -88,37 +88,6 @@ variable "extra_allowed_hosts" {
   type        = list(string)
   description = "Hosts extras no ALLOWED_HOSTS (ex.: se o VPC Link entregar outro Host)."
   default     = []
-}
-
-variable "office_hours_enabled" {
-  type        = bool
-  description = "Turns ECS and RDS on/off on business hours. false = always on (minimum 1 task)."
-  default     = false
-}
-
-variable "schedule_timezone" {
-  type    = string
-  default = "America/Sao_Paulo"
-}
-
-variable "ecs_start_cron" {
-  type    = string
-  default = "cron(0 8 ? * MON-FRI *)"
-}
-
-variable "ecs_stop_cron" {
-  type    = string
-  default = "cron(0 20 ? * MON-FRI *)"
-}
-
-variable "rds_start_cron" {
-  type    = string
-  default = "cron(40 7 ? * MON-FRI *)"
-}
-
-variable "rds_stop_cron" {
-  type    = string
-  default = "cron(10 20 ? * MON-FRI *)"
 }
 
 variable "alarm_email" {

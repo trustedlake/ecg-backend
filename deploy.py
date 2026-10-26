@@ -100,7 +100,7 @@ def plan(args):
     for command in (["init", "-input=false"],
                     ["plan", "-input=false", "-lock-timeout=60s",
                      f"-var=aws_profile={args.profile or ''}",
-                     f"-var=region={REGION}", "-var=office_hours_enabled=false"]):
+                     f"-var=region={REGION}"]):
         result = subprocess.run(prefix + command, env=env)
         if result.returncode:
             raise RuntimeError(f"Terraform {command[0]} failed ({result.returncode}).")

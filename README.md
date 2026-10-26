@@ -25,7 +25,7 @@ The helper supports Windows, macOS and Linux with Python 3.9+.
 - ECS Fargate (ARM) runs one task with two containers: `web` (gunicorn + WhiteNoise, serving `/api`, `/admin` and the Expo web export) and `worker` (`manage.py ecg_worker`, consuming SQS).
 - API Gateway HTTP API → VPC Link → Cloud Map → ECS. No CloudFront, no load balancer.
 - RDS PostgreSQL 17 (private, SSL only); SQS `ecg-tasks` with a DLQ; secrets in SSM `/ecg/prod/*`.
-- Production runs 24/7; keep `office_hours_enabled=false` in infrastructure plans and applies.
+- Production runs 24/7..
 - CI/CD: CodePipeline + CodeBuild (`ci/`): test → build image → deploy (migrations, ECS update, smoke test).
 - Infrastructure as code: `infra/aws` (see its README).
 

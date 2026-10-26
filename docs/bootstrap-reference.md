@@ -67,7 +67,7 @@ AWS provider ~> 6.69). To rotate the database password, update SSM and increment
    before creating the reading function in a fresh account. Local image builds
    require Docker; normal releases use CodeBuild.
 4. In this repository's `infra/aws`, run `terraform init`, then
-   `terraform plan -var office_hours_enabled=false -var aws_profile=<profile>`.
+   `terraform plan -var aws_profile=<profile>`.
    Set `alarm_email` to your address; review the plan and apply with the same
    variables. Set `test_scenarios_enabled=false` if staff mocks must be disabled.
 5. In the us-east-1 AWS Developer Tools Connections console, authorize
@@ -90,8 +90,7 @@ Interpretation: Lambda `ecg-interpretation` (Python package). OpenCV runs in rea
 not in the Django backend. The backend pipeline builds both backend and Expo web.
 
 Monitoring uses CloudWatch, SNS `ecg-alerts` and an AWS Budget. Production is
-always on; always include `office_hours_enabled=false` in backend plans/applies
-because the Terraform variable still defaults to business hours.
+always on, with no automatic shutdown schedules.
 Task defaults are 512 CPU units and 1024 MB; the next pipeline release picks up
 reviewed task definition changes. Refer to `ci/deploy.sh` in each repository for
 smoke-check rollback behavior. The helper never destroys infrastructure.

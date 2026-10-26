@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # Deploy do backend ECG (etapa Deploy do CodePipeline; plano §I3):
-#   1. starts RDS if it is stopped (deploy outside business hours);
+#   1. starts RDS if it is stopped;
 #   2. registers a new task definition revision with the IMAGE_TAG image;
 #   3. migrate + ensure_admin in ONE one-off task (failure = deploy aborted, service untouched);
 #   4. update-service and wait until the new task is RUNNING (the circuit breaker rolls back if tasks do not start);
 #   5. smoke test on /api/health/ (new version) and / (HTML); on failure, roll back to the previous revision.
 #      It does not wait for ECS to finish tearing down the old task (about 100 s of Fargate teardown);
 #      the smoke test already proves the new version serves traffic and ECS finishes the rollout on its own;
-#   6. if the environment was off and we are outside business hours, turn it off again.
 #
 # Variables (from the CodeBuild project, infra/aws/cicd.tf): IMAGE_TAG, ECR_REPOSITORY_URL, API_URL,
-# CLUSTER, SERVICE, TASK_FAMILY, DB_ID, LOG_GROUP, OFFICE_HOURS_ENABLED.
+# CLUSTER, SERVICE, TASK_FAMILY, DB_ID, LOG_GROUP.
 set -euo pipefail
 
 : "${IMAGE_TAG:?}" "${ECR_REPOSITORY_URL:?}" "${API_URL:?}"
@@ -19,30 +18,18 @@ SERVICE="${SERVICE:-ecg-backend}"
 TASK_FAMILY="${TASK_FAMILY:-ecg-backend}"
 DB_ID="${DB_ID:-ecg}"
 LOG_GROUP="${LOG_GROUP:-/ecs/ecg-backend}"
-OFFICE_HOURS_ENABLED="${OFFICE_HOURS_ENABLED:-false}"
 API_URL="${API_URL%/}"
 IMAGE="$ECR_REPOSITORY_URL:$IMAGE_TAG"
 RESOURCE_ID="service/$CLUSTER/$SERVICE"
 
 log() { echo "[deploy] $*"; }
 
-inside_office_hours() {
-  local dow hour
-  dow=$(TZ=America/Sao_Paulo date +%u)
-  hour=$(TZ=America/Sao_Paulo date +%H)
-  [ "$dow" -le 5 ] && [ "$((10#$hour))" -ge 8 ] && [ "$((10#$hour))" -lt 20 ]
-}
 
 # --- 1. Ambiente ligado? ---
 db_status=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
   --query 'DBInstances[0].DBInstanceStatus' --output text)
 min_capacity=$(aws application-autoscaling describe-scalable-targets --service-namespace ecs \
   --resource-ids "$RESOURCE_ID" --query 'ScalableTargets[0].MinCapacity' --output text)
-was_off=false
-if [ "$db_status" != "available" ] || [ "$min_capacity" = "0" ]; then
-  was_off=true
-  log "Environment off (RDS: $db_status, minimum tasks: $min_capacity); starting it for the deploy."
-fi
 if [ "$db_status" = "stopped" ]; then
   aws rds start-db-instance --db-instance-identifier "$DB_ID" >/dev/null
 fi
@@ -172,12 +159,4 @@ else
   rollback
 fi
 
-# --- 6. Turn off again if the deploy was outside business hours ---
-if $was_off && [ "$OFFICE_HOURS_ENABLED" = "true" ] && ! inside_office_hours; then
-  log "Outside business hours: turning off again (ECS at 0, RDS stopping)."
-  aws application-autoscaling register-scalable-target --service-namespace ecs \
-    --scalable-dimension ecs:service:DesiredCount --resource-id "$RESOURCE_ID" \
-    --min-capacity 0 --max-capacity 0
-  aws rds stop-db-instance --db-instance-identifier "$DB_ID" >/dev/null || true
-fi
 log "Deploy done."

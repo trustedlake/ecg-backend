@@ -115,9 +115,9 @@ the app (they stay in S3, `artifacts.signal`).
 
 ### 0.2 Cost estimate (`sa-east-1` prices from the AWS pricing API, 2026-10-15, before taxes)
 
-On-hours: Mon-Fri 08:00-20:00, about 264 h/month.
+Production runs continuously (24/7).
 
-| Item | On only during business hours | 24/7 (reference) |
+| Item | Historical reduced-runtime estimate | 24/7 |
 |---|---|---|
 | Fargate ARM 0.5 vCPU / 1 GB (US$0.0557/vCPU-h + US$0.00612/GB-h) | $8.97 | $24.80 |
 | Task public IPv4 (US$0.005/h) | $1.32 | $3.65 |
@@ -465,10 +465,7 @@ On-hours: Mon-Fri 08:00-20:00, about 264 h/month.
 >    etc., for the 6 codes), **Take a new photo** button.
 > 3. `ErrorScreen` (`reading_error` / `interpretation_error` and network failures): specific message; **Try
 >    again** (`retry`) if `can_retry`, otherwise **Take a new photo** (`needs_new_photo`). Network error -> re-fetch
->    the attempt (the state is not lost). **Outside business hours** (the backend is off Mon-Fri 20:00-08:00 and on
->    weekends; API Gateway returns 503 without a Django JSON body): any 503 whose body is not backend JSON
->    -> notice "Service available Monday to Friday, 8 am to 8 pm" (text in a single constant), with no
->    automatic retry loop. Includes the login screen.
+>    the attempt (the state is not lost). Unavailable API responses are handled as service errors with retry guidance.
 > 4. `ResultScreen` (`completed`): highlighted summary (color/icon per `classification`, `headline`, rhythm, HR,
 >    `key_findings`, `text`); interpretation and reading warnings at the top; expandable details: measurements
 >    (table with value, unit and confidence; `null` = "not measurable"), findings (with severity), criteria (badge
@@ -577,7 +574,7 @@ On-hours: Mon-Fri 08:00-20:00, about 264 h/month.
 
 ---
 
-## I2: Terraform: ECS Fargate, API Gateway, business hours and monitoring (`plan` only)
+## I2: Terraform: ECS Fargate, API Gateway and monitoring (`plan` only)
 
 **Prompt:**
 
@@ -585,7 +582,7 @@ On-hours: Mon-Fri 08:00-20:00, about 264 h/month.
 > I1: VPC, subnets, SGs `ecg-vpclink`/`ecg-ecs`/`ecg-rds`, RDS, ECR, SQS, roles `ecg-ecs-execution`/`ecg-ecs-task`;
 > **check the real resource and output names in the code**). Also the `Dockerfile` and the
 > `ecg_worker` command. **Do not run `terraform apply`.** Same state and folder as I1, new files (`ecs.tf`, `api.tf`,
-> `schedule.tf`, `monitoring.tf`).
+> `autoscaling.tf`, `monitoring.tf`).
 >
 > 1. ECS: cluster `ecg` (Container Insights **off**). Task definition `ecg-backend`: Fargate, `ARM64`,
 >    `cpu = var.task_cpu` (default 512), `memory = var.task_memory` (default 1024), `awsvpc`, I1 roles, image
@@ -603,21 +600,16 @@ On-hours: Mon-Fri 08:00-20:00, about 264 h/month.
 >    min healthy 100 % / max 200 %, `enable_execute_command = false`, `service_registries` pointing to a
 >    Cloud Map service (private DNS namespace `ecg.internal` in the VPC, **SRV** record, `container_name = "web"`,
 >    `container_port = 8000`). `lifecycle { ignore_changes = [desired_count, task_definition] }` (the pipeline does
->    the deploy and the Scheduler/autoscaling controls the count).
-> 3. Autoscaling (Application Auto Scaling): target `min 1 / max 2`, CPU target tracking 70 %. **Scheduled actions**
->    in the schedule timezone: `cron(0 8 ? * MON-FRI *)` -> min 1/max 2; `cron(0 20 ? * MON-FRI *)` -> min 0/max 0.
->    Times in variables.
-> 4. RDS on/off: EventBridge Scheduler (group `ecg`, schedule timezone) with universal targets
->    `arn:aws:scheduler:::aws-sdk:rds:startDBInstance` (`cron(40 7 ? * MON-FRI *)`) and `...:stopDBInstance`
->    (`cron(10 20 ? * MON-FRI *)`), its own role with only `rds:StartDBInstance`/`StopDBInstance` on the instance.
->    Variable `office_hours_enabled` (default `true`): if `false`, no scheduled action is created and the minimum stays 1.
+>    the deploy and autoscaling controls the count).
+> 3. Autoscaling (Application Auto Scaling): target `min 1 / max 2`, CPU target tracking 70 %.
+> 4. RDS stays available continuously; there are no timed shutdown resources.
 > 5. API Gateway **HTTP API**: VPC Link (public subnets, SG `ecg-vpclink`); private `HTTP_PROXY` integration
 >    with `integration_uri` = the Cloud Map service ARN, `connection_type = VPC_LINK`, timeout 30 s; route
 >    `$default`; stage `$default` with auto-deploy, throttling (burst 50, rate 20) and a JSON access log in its own log
 >    group (14 days).
 > 6. Scripts `scripts/start.sh` and `scripts/stop.sh` (`set -euo pipefail`, using the AWS CLI): `start` starts
 >    RDS (if stopped), waits for `db-instance-available`, sets the autoscaling target to min 1/max 2 and waits for the
->    service to stabilize; `stop` does the reverse. For use outside business hours.
+>    service to stabilize; `stop` does the reverse. For explicit manual maintenance only.
 > 7. Monitoring: SNS topic `ecg-alerts` with an email subscription (variable `alarm_email`). Exactly 10
 >    alarms (free tier), all with `treat_missing_data = notBreaching` and an SNS action: API Gateway 5xx >= 5 in
 >    5 min; ECS service CPU > 80 % for 10 min; ECS service memory > 85 % for 10 min; RDS CPU > 80 % for
@@ -628,14 +620,14 @@ On-hours: Mon-Fri 08:00-20:00, about 264 h/month.
 > 10. Images bucket CORS: **do not manage it here** (it belongs to the `ecg-lambdas` repo,
 >     `infra/terraform/modules/shared`). Write the exact change in the report (add the origin
 >     `https://<api-id>.execute-api.sa-east-1.amazonaws.com` to the PUT `AllowedOrigins`).
-> 11. Update `infra/aws/README.md`: business hours, `start.sh`/`stop.sh`, how to change
+> 11. Update `infra/aws/README.md`: continuous availability, manual maintenance scripts, how to change
 >     `task_cpu`.
 >
 > Acceptance criteria: `terraform fmt -check`, `validate` and `plan` (with `-var alarm_email=...`) with no errors;
 > scripts pass `shellcheck` (if available). Nothing applied.
 >
 > **Report to return:** new `plan` resources; the rendered task definition (JSON, without secrets); the
-> 10 alarms (name, metric, threshold); the scheduled actions with timezone; the CORS change to make in `ecg-lambdas`;
+> 10 alarms (name, metric, threshold); continuous availability; the CORS change to make in `ecg-lambdas`;
 > uncertain points, especially: the `Host` that reaches Django through the VPC Link (`ALLOWED_HOSTS` depends on it) and whether
 > the SRV record + container health work with the HTTP API Cloud Map integration.
 
@@ -660,8 +652,8 @@ On-hours: Mon-Fri 08:00-20:00, about 264 h/month.
 >      (`IMAGE_TAG=...`) + `ci/deploy.sh`.
 >    - `buildspec-deploy.yml` calling `ci/deploy.sh`.
 > 2. `ci/deploy.sh` (`set -euo pipefail`):
->    1. If RDS is stopped or the autoscaling target is at max 0 (outside business hours), run
->       `scripts/start.sh` and note in the log that the environment stays on until the next scheduled shutdown.
+>    1. If RDS is stopped or the autoscaling target is at max 0, run
+>       `scripts/start.sh` and note in the log that the environment stays on.
 >    2. Read the service's current task definition, switch the `web` and `worker` container images to the new tag and
 >       `APP_VERSION`, register a new revision.
 >    3. Migration: `aws ecs run-task` with the new revision, same subnets/SG/public IP as the service, `command`
@@ -688,7 +680,7 @@ On-hours: Mon-Fri 08:00-20:00, about 264 h/month.
 >    - Pipeline failure notification on SNS `ecg-alerts` (EventBridge rule).
 > 4. Remove `.github/workflows/docker-publish.yml` (CI/CD moves to AWS); mention it in the report.
 > 5. Update `infra/aws/README.md`: authorizing the GitHub connection, triggering the pipeline by hand, what
->    happens on a deploy outside business hours.
+>    the deploy keeps the environment available.
 >
 > Acceptance criteria: `terraform fmt -check`, `validate`, `plan` with no errors; `ci/deploy.sh` passes `shellcheck`
 > (if available).

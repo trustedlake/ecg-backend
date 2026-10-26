@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Turns production on outside business hours: RDS, then ECS (min 1 / max 2).
+# Turns production on when manually stopped: RDS, then ECS (min 1 / max 2).
 # Lasts until the next scheduled action (at 20:00 on business days ECS goes back to 0).
 # Usage: scripts/start.sh   (default AWS_PROFILE: trustedlake)
 set -euo pipefail

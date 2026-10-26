@@ -1,5 +1,5 @@
 # 10 alarmes (cota gratuita do CloudWatch) → SNS ecg-alerts (e-mail) e budget mensal.
-# notBreaching: outside business hours there is no metric (ECS at 0, RDS stopped) and that is not an alarm.
+# notBreaching: when manually stopped there is no metric (ECS at 0, RDS stopped) and that is not an alarm.
 
 resource "aws_sns_topic" "alerts" {
   name = "ecg-alerts"
@@ -14,7 +14,7 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 locals {
   alarms = {
     "ecg-api-5xx" = {
-      description = "API Gateway: 5xx responses (outside business hours the 503 does not reach here: no app traffic)"
+      description = "API Gateway: 5xx responses (when manually stopped the 503 does not reach here: no app traffic)"
       namespace   = "AWS/ApiGateway"
       metric      = "5xx"
       dimensions  = { ApiId = aws_apigatewayv2_api.this.id, Stage = aws_apigatewayv2_stage.default.name }

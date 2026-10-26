@@ -52,7 +52,7 @@ class DeploymentTests(unittest.TestCase):
                 deploy.doctor(self.args())
             identity.assert_not_called()
 
-    def test_plan_preserves_always_on_and_profile(self):
+    def test_plan_preserves_profile(self):
         args = self.args()
         args.profile = "competition"
         with patch.object(deploy.shutil, "which", return_value="terraform"), \
@@ -60,7 +60,6 @@ class DeploymentTests(unittest.TestCase):
             run.return_value.returncode = 0
             deploy.plan(args)
             command = run.call_args.args[0]
-            self.assertIn("-var=office_hours_enabled=false", command)
             self.assertIn("-var=aws_profile=competition", command)
             self.assertEqual(run.call_args.kwargs["env"]["AWS_PROFILE"], "competition")
             self.assertNotIn("apply", command)

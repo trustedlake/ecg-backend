@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Turns production off: ECS to 0, then stops RDS (storage is still billed).
-# RDS restarts on its own after 7 days stopped (AWS rule) and the Scheduler starts it on the next business day.
+# RDS restarts on its own after 7 days stopped (AWS rule) and can be started manually.
 # Usage: scripts/stop.sh   (default AWS_PROFILE: trustedlake)
 set -euo pipefail
 

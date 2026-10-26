@@ -37,19 +37,12 @@ After the first apply, confirm the SNS subscription from the email you receive (
 - `network.tf`, `rds.tf`, `ecr.tf`, `sqs.tf`, `iam.tf` (I1): VPC, SGs, RDS, ECR, queue + DLQ, task roles.
 - `ecs.tf`: cluster `ecg`, task `ecg-backend` (containers `web` and `worker`), service and Cloud Map `backend.ecg.internal`.
 - `api.tf`: HTTP API -> VPC Link -> Cloud Map. The URL is in the `api_url` output.
-- `schedule.tf`: autoscaling (1-2 tasks, CPU 70 %) and business hours.
+- `autoscaling.tf`: autoscaling (1-2 tasks, CPU 70 %).
 - `monitoring.tf`: SNS `ecg-alerts`, 10 alarms and the monthly budget (US$35).
 - `cicd.tf`: GitHub connection, 3 CodeBuild projects, artifact bucket and the CodePipeline.
 
-## Business hours
-Mon-Fri, in the timezone set in `schedule.tf`: RDS starts at 07:40 and stops at 20:10; ECS scales up at 08:00 and
-goes to 0 at 20:00. Outside those hours API Gateway answers 503 and the app shows the business-hours notice.
-
-- One-off exception: `scripts/start.sh` (RDS, then ECS min 1/max 2) and `scripts/stop.sh` (the reverse).
-  They last until the next scheduled action.
-- Always on: `-var office_hours_enabled=false` removes the schedules (cost about US$60/month). Then
-  run `scripts/start.sh` once, because Terraform does not touch the current autoscaling min/max.
-- The times are in the variables `ecs_start_cron`, `ecs_stop_cron`, `rds_start_cron` and `rds_stop_cron`.
+## Availability
+Production runs continuously with at least one ECS task. No automatic shutdown schedules exist.
 
 ## Task size
 `task_cpu` (default 512 = 0.5 vCPU) and `task_memory` (1024 MB). For 1 vCPU: `-var task_cpu=1024 -var
@@ -71,12 +64,10 @@ A pipeline failure sends an email through the SNS topic `ecg-alerts`.
    (from the latest one in the family, so Terraform changes land here), runs `migrate` and
    `ensure_admin` in a single one-off task, updates the service, waits for the new task, smoke-tests `/api/health/` (new version) and `/`,
    and rolls back to the previous revision if the smoke test fails.
-4. **Deploy outside business hours:** the environment is turned on only for the deploy and turned off again at the end
-   (ECS at 0, RDS stopping). Within business hours it stays as it is.
 
 ## First deploy
-The service and autoscaling start with 0 tasks, because the `bootstrap` image does not exist in ECR. The first
-pipeline run creates the image and the revision and starts the task (or the 08:00 action starts it the next day).
+The service starts with 0 tasks, because the `bootstrap` image does not exist in ECR. The first
+pipeline run creates the image and the revision and starts the task.
 
 ## Region: us-east-1 (moved from sa-east-1 on 2026-10-23)
 The whole platform runs in `us-east-1` (the competition is evaluated there), with a new empty database and empty buckets.

@@ -53,8 +53,7 @@ An active execution causes the helper to refuse an additional run.
 These commands operate the existing production account. They do not create a fresh
 AWS account or duplicate the environment. See [bootstrap reference](bootstrap-reference.md)
 for resource dependencies, SSM secrets, state and first-time setup. Infrastructure
-changes require review of the Terraform plan and a separate apply. Always pass
-`-var office_hours_enabled=false` when applying the backend stack.
+changes require review of the Terraform plan and a separate apply. Production has no automatic shutdown schedules.
 
 The AWS GitHub connections require manual authorization, and the SNS alert email
 requires manual confirmation. Never commit credentials or Terraform state. Keep the

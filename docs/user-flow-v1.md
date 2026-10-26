@@ -26,7 +26,7 @@
 | D4 | Database | **RDS PostgreSQL `db.t4g.micro` Single-AZ**, gp3 20 GB, private subnet, TLS required, 7-day backups, deletion protection. No Multi-AZ. Password in SSM (outside the Terraform state). | **decided** |
 | D5 | Account/region | Account `785236377332`, region `us-east-1` (moved from sa-east-1 on 2026-10-23). | assumed |
 | D6 | Processing | Asynchronous: the endpoint starts the task and answers 202, the task goes to an SQS queue (with a DLQ) consumed by a `worker` container in the same ECS task, which calls the reading/interpretation lambda, and the app polls the state (every 2 s). Reason: API Gateway cuts off at 30 s, and the real scripts can take longer than the mocks. | decided (technical) |
-| D8 | Business hours | Mon-Fri 08:00-20:00 (timezone set in `infra/aws/schedule.tf`). EventBridge Scheduler starts/stops RDS and ECS; outside those hours the URL returns 503 and the app shows the hours. `scripts/start.sh` for exceptions. Cost about US$25/month (24/7 would be about US$60). | **decided** |
+| D8 | Availability | Production runs continuously (24/7). No timed shutdowns. | **decided** |
 | D7 | Test scenarios in prod | Mock scenario selection (`success`, `success_with_warnings`, `failure`, `refused` + `code`) per attempt, only for `is_staff` users and only with the flag `ECG_TEST_SCENARIOS_ENABLED=true`. Otherwise the field is rejected. | decided (technical) |
 
 Out of V1 scope: AI fallback (V2), own domain (the `execute-api` URL already has HTTPS; a custom
@@ -62,7 +62,6 @@ created ──read──▶ reading ──▶ awaiting_validation ──accept�
 | Interpretation | `OK_WITH_WARNINGS` | `completed` | Same, with the warnings visible at the top of the result |
 | Interpretation | `ERROR` | `interpretation_error` | Specific message; **Try again** if `retryable`, otherwise **Take a new photo** |
 | Any | network/backend failure (5xx, timeout) | n/a | Generic message + **Try again** (the state is not lost: the app re-fetches the attempt) |
-| Any | outside business hours (API Gateway 503, D8) | n/a | Notice "Service available Monday to Friday, 8 am to 8 pm" |
 
 Text rules: the UI shows `message` (coming from the lambda) and drives the flow by `code`/`retryable`,
 never by text. The result screen always shows the `disclaimer`.

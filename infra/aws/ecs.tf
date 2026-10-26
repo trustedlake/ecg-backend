@@ -145,7 +145,7 @@ resource "aws_ecs_service" "backend" {
   platform_version = "LATEST"
 
   # Starts at 0: the image only exists after the first pipeline build (I3). From then on the
-  # count is driven by autoscaling (schedule.tf) and the revision by ci/deploy.sh.
+  # count is driven by autoscaling (autoscaling.tf) and the revision by ci/deploy.sh.
   desired_count = 0
 
   deployment_minimum_healthy_percent = 100

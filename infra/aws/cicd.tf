@@ -238,14 +238,13 @@ locals {
     test  = { DB_ID = aws_db_instance.this.identifier }
     build = { ECR_REPOSITORY_URL = aws_ecr_repository.backend.repository_url }
     deploy = {
-      ECR_REPOSITORY_URL   = aws_ecr_repository.backend.repository_url
-      API_URL              = aws_apigatewayv2_stage.default.invoke_url
-      CLUSTER              = aws_ecs_cluster.this.name
-      SERVICE              = aws_ecs_service.backend.name
-      TASK_FAMILY          = aws_ecs_task_definition.backend.family
-      DB_ID                = aws_db_instance.this.identifier
-      LOG_GROUP            = aws_cloudwatch_log_group.backend.name
-      OFFICE_HOURS_ENABLED = tostring(var.office_hours_enabled)
+      ECR_REPOSITORY_URL = aws_ecr_repository.backend.repository_url
+      API_URL            = aws_apigatewayv2_stage.default.invoke_url
+      CLUSTER            = aws_ecs_cluster.this.name
+      SERVICE            = aws_ecs_service.backend.name
+      TASK_FAMILY        = aws_ecs_task_definition.backend.family
+      DB_ID              = aws_db_instance.this.identifier
+      LOG_GROUP          = aws_cloudwatch_log_group.backend.name
     }
   }
 }

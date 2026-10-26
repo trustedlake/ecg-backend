@@ -1,8 +1,8 @@
 # ECG Backend
 
-Django API behind the ECG app (Expo Go / Expo Web). It stores exams and attempts, hands out presigned S3 uploads and runs two lambdas: `ecg-reading` (trace extraction, contract 2.0) and `ecg-interpretation` (mock for now). It does not issue a clinical diagnosis.
+Django API behind the ECG app (Expo Go / Expo Web). It stores exams and attempts, hands out presigned S3 uploads, invokes `ecg-reading` for trace extraction and invokes `ecg-interpretation` for automated signal analysis. It does not issue a clinical diagnosis.
 
-The lambda contract lives in [tl-gmiler/ecg-lambdas-v1](https://github.com/trustedlake/ecg-lambdas-v1). The user flow and the migration decisions are in `docs/user-flow-v1.md` and `docs/migration-plan-v1.md`.
+The extraction, approved Selector and lambda contract live in [trustedlake/ecg-lambdas-v1](https://github.com/trustedlake/ecg-lambdas-v1). The user flow and migration decisions are in `docs/user-flow-v1.md` and `docs/migration-plan-v1.md`.
 
 ## Flow
 

@@ -13,6 +13,7 @@ Reading: `ecg-reading`, contract 2.0 (six methods; the backend keeps the `OK` on
   of the API `Attempt` object (plan §0.1); presigned URLs are generated on the fly, never stored.
 """
 
+import functools
 import json
 import logging
 from datetime import timedelta
@@ -82,8 +83,13 @@ def _lambda_client():
     )
 
 
+@functools.cache
 def _s3_client():
-    """S3 client forced to SigV4 for presigned URLs (SigV2 deprecated by AWS)."""
+    """S3 client forced to SigV4 for presigned URLs (SigV2 deprecated by AWS).
+
+    Cached per process: a new Session per presign re-resolves credentials every time
+    (~15 presigns per Attempt made the polling GET take ~5 s). boto3 clients are thread-safe.
+    """
     return _session().client("s3", config=Config(signature_version="s3v4"))
 
 

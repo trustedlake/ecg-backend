@@ -68,6 +68,7 @@ def status(args):
 
 
 def doctor(args):
+    """Check local prerequisites before requiring AWS authentication."""
     for tool in ("aws", "git", "terraform"):
         location = shutil.which(tool)
         print(f"{tool}: {location or 'MISSING'}")
@@ -76,6 +77,7 @@ def doctor(args):
     version = json.loads(run(["terraform", "version", "-json"]))["terraform_version"]
     if tuple(map(int, version.split(".")[:2])) < (1, 11):
         raise RuntimeError("Terraform >= 1.11 is required.")
+    identity(args)
     for name in PIPELINES:
         aws(args, "codepipeline", "get-pipeline", "--name", name)
         print(f"Pipeline {name}: accessible")
@@ -142,8 +144,10 @@ def main():
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     try:
-        identity(args)
-        {"doctor": doctor, "plan": plan, "deploy": deploy, "status": status}[args.command](args)
+        command = {"doctor": doctor, "plan": plan, "deploy": deploy, "status": status}[args.command]
+        if args.command != "doctor":
+            identity(args)
+        command(args)
     except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

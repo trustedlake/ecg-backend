@@ -45,6 +45,13 @@ class DeploymentTests(unittest.TestCase):
         with patch.object(deploy, "run", return_value=""):
             self.assertEqual(deploy.aws(self.args(), "s3api", "head-bucket"), {})
 
+    def test_doctor_reports_missing_local_tool_before_aws_identity(self):
+        with patch.object(deploy.shutil, "which", return_value=None), \
+                patch.object(deploy, "identity") as identity:
+            with self.assertRaisesRegex(RuntimeError, "Install aws"):
+                deploy.doctor(self.args())
+            identity.assert_not_called()
+
     def test_plan_preserves_always_on_and_profile(self):
         args = self.args()
         args.profile = "competition"

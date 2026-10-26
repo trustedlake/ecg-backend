@@ -8,8 +8,8 @@ photo, review the extracted trace and continue to the result.
 
 ## Source code
 
-- [Backend and deployment helper](https://github.com/tl-gmiler/ecg-backend)
-- [Extractor, Selector and interpretation](https://github.com/tl-gmiler/ecg-lambdas-v1)
+- [Backend and deployment helper](https://github.com/trustedlake/ecg-backend)
+- [Extractor, Selector and interpretation](https://github.com/trustedlake/ecg-lambdas-v1)
 - [Expo frontend](https://github.com/trustedlake/ecg-reader)
 
 ## Existing AWS environment
@@ -19,7 +19,7 @@ local Docker are required for the helper. Authenticate an AWS identity authorize
 for account `785236377332`, region `us-east-1`. Clone the backend and run from its root:
 
 ```text
-git clone https://github.com/tl-gmiler/ecg-backend.git
+git clone https://github.com/trustedlake/ecg-backend.git
 cd ecg-backend
 python deploy.py doctor
 python deploy.py plan
@@ -42,8 +42,11 @@ For a named AWS profile append `--profile trustedlake` to each command.
 per pipeline; change with `--timeout 2400`. Timeout or Ctrl+C does not cancel AWS:
 inspect `status` and the CodePipeline console before retrying.
 
-The helper deploys the remote `main` branches, not uncommitted local files. Merging
-to `main` already triggers the pipelines; use `status` for that automatic release.
+The public delivery repositories are under `trustedlake`. Existing production
+pipelines still read backend and Lambdas from `tl-gmiler` and frontend from
+`trustedlake/ecg-reader`. The helper deploys those configured remote `main` branches.
+Changes to the public backend/Lambda copies do not trigger production; migrating
+pipeline sources requires an authorized AWS GitHub connection and Terraform review.
 An active execution causes the helper to refuse an additional run.
 
 ## New environment / infrastructure changes

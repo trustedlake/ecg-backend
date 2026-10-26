@@ -12,7 +12,7 @@ different account requires adapting those values and the helper's account guard.
 | --- | --- | --- |
 | Backend platform | This repository, `infra/aws` | `ecg-backend-prod/terraform.tfstate` |
 | Image/results buckets | Legacy bucket stack, `trustedlake/ecg-lambdas` | `prod/terraform.tfstate` |
-| Lambda functions and pipeline | `tl-gmiler/ecg-lambdas-v1`, `lambdas/infra` | `ecg-mock-lambdas/terraform.tfstate` |
+| Lambda functions and pipeline | `trustedlake/ecg-lambdas-v1`, `lambdas/infra` | `ecg-mock-lambdas/terraform.tfstate` |
 
 State bucket: `ecg-terraform-state-785236377332-us-east-1`, versioned and encrypted.
 The bucket and AWS credentials must exist before `terraform init`.
@@ -51,7 +51,7 @@ AWS provider ~> 6.69). To rotate the database password, update SSM and increment
 ## First setup order
 
 1. Provision state, storage buckets, approved model and SSM parameters above.
-2. Clone `tl-gmiler/ecg-lambdas-v1`. Prepare the interpretation package from the
+2. Clone `trustedlake/ecg-lambdas-v1`. Prepare the interpretation package from the
    repository root. This Python command works on Windows, macOS and Linux:
 
    ```text

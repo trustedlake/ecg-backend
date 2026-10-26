@@ -15,12 +15,17 @@ The lambda contract lives in [tl-gmiler/ecg-lambdas-v1](https://github.com/tl-gm
 
 Test scenarios (`success`, `success_with_warnings`, `refused`, `failure`) only work for staff users and with `ECG_TEST_SCENARIOS_ENABLED=true`.
 
+## Deployment
+
+Use [the deployment guide](docs/deployment.md) and `python deploy.py doctor`.
+The helper supports Windows, macOS and Linux with Python 3.9+.
+
 ## Production (AWS, us-east-1)
 
 - ECS Fargate (ARM) runs one task with two containers: `web` (gunicorn + WhiteNoise, serving `/api`, `/admin` and the Expo web export) and `worker` (`manage.py ecg_worker`, consuming SQS).
 - API Gateway HTTP API → VPC Link → Cloud Map → ECS. No CloudFront, no load balancer.
 - RDS PostgreSQL 17 (private, SSL only); SQS `ecg-tasks` with a DLQ; secrets in SSM `/ecg/prod/*`.
-- Business hours only (Mon–Fri, America/Sao_Paulo); outside them the API answers 503.
+- Production runs 24/7; keep `office_hours_enabled=false` in infrastructure plans and applies.
 - CI/CD: CodePipeline + CodeBuild (`ci/`): test → build image → deploy (migrations, ECS update, smoke test).
 - Infrastructure as code: `infra/aws` (see its README).
 

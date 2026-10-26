@@ -4,7 +4,7 @@
 # Each GitHub account needs its own connection (one connection = one install of the AWS app).
 variable "backend_owner" {
   type    = string
-  default = "tl-gmiler"
+  default = "trustedlake"
 }
 
 variable "backend_repo" {
@@ -370,7 +370,7 @@ resource "aws_codepipeline" "this" {
       version          = "1"
       output_artifacts = ["backend"]
       configuration = {
-        ConnectionArn    = aws_codestarconnections_connection.github.arn
+        ConnectionArn    = aws_codestarconnections_connection.github_frontend.arn
         FullRepositoryId = "${var.backend_owner}/${var.backend_repo}"
         BranchName       = var.pipeline_branch
       }
@@ -554,7 +554,7 @@ output "pipeline_name" {
 }
 
 output "github_connection_arn" {
-  description = "Backend connection (tl-gmiler account). PENDING until authorized in the console (Developer Tools > Connections)."
+  description = "Legacy connection (retained for rollback). PENDING until authorized in the console (Developer Tools > Connections)."
   value       = aws_codestarconnections_connection.github.arn
 }
 

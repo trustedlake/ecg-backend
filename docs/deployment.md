@@ -42,11 +42,10 @@ For a named AWS profile append `--profile trustedlake` to each command.
 per pipeline; change with `--timeout 2400`. Timeout or Ctrl+C does not cancel AWS:
 inspect `status` and the CodePipeline console before retrying.
 
-The public delivery repositories are under `trustedlake`. Existing production
-pipelines still read backend and Lambdas from `tl-gmiler` and frontend from
-`trustedlake/ecg-reader`. The helper deploys those configured remote `main` branches.
-Changes to the public backend/Lambda copies do not trigger production; migrating
-pipeline sources requires an authorized AWS GitHub connection and Terraform review.
+Production pipelines read `main` from `trustedlake/ecg-backend`,
+`trustedlake/ecg-lambdas-v1` and `trustedlake/ecg-reader` through the authorized
+`ecg-github-frontend` AWS connection in `us-east-1`. Pushes to these repositories
+trigger their corresponding production pipeline. The helper deploys these remote branches.
 An active execution causes the helper to refuse an additional run.
 
 ## New environment / infrastructure changes

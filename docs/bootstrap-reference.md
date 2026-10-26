@@ -70,8 +70,8 @@ AWS provider ~> 6.69). To rotate the database password, update SSM and increment
    `terraform plan -var office_hours_enabled=false -var aws_profile=<profile>`.
    Set `alarm_email` to your address; review the plan and apply with the same
    variables. Set `test_scenarios_enabled=false` if staff mocks must be disabled.
-5. In the regional AWS Developer Tools Connections console, authorize `ecg-github`
-   for `tl-gmiler` and `ecg-github-frontend` for `trustedlake`. Public repositories
+5. In the us-east-1 AWS Developer Tools Connections console, authorize
+   `ecg-github-frontend` for all three `trustedlake` repositories. Public repositories
    still require the source connections to be authorized. Confirm the SNS email.
 6. From the backend root, run `python deploy.py doctor`, then `python deploy.py deploy`.
    The bootstrap ECS service starts at zero tasks until an application image is

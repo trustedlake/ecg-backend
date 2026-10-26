@@ -2,7 +2,7 @@
 
 Terraform for the architecture in `docs/migration-plan-v1.md` §0. State in
 `s3://ecg-terraform-state-785236377332-us-east-1/ecg-backend-prod/terraform.tfstate` (`us-east-1`; the old sa-east-1 state stays in `ecg-lambdas-terraform-state` until the stack is destroyed).
-Buckets and lambdas are **not** managed here (they come from the `tl-gmiler/ecg-lambdas-v1` stacks: `ecg-reading`, `ecg-interpretation`).
+Buckets and lambdas are **not** managed here (they come from the `trustedlake/ecg-lambdas-v1` stacks: `ecg-reading`, `ecg-interpretation`).
 
 ## Prerequisites
 - Terraform >= 1.11 (write-only/ephemeral); provider `hashicorp/aws` ~> 6.69.
@@ -57,18 +57,15 @@ task_memory=2048`. Terraform registers a new task definition revision; the servi
 on the next pipeline deploy (the service ignores `task_definition`).
 
 ## CI/CD (`cicd.tf`, `ci/`)
-CodePipeline V2 `ecg-backend` (QUEUED mode): a push to `main` of `tl-gmiler/ecg-backend` **or**
+CodePipeline V2 `ecg-backend` (QUEUED mode): a push to `main` of `trustedlake/ecg-backend` **or**
 `trustedlake/ecg-reader` -> **Test** (`ci/buildspec-test.yml`) and **Build** (Expo web export with
 `scripts/build_frontend.sh` + ARM image in ECR, tag `<back sha>-<front sha>`) in parallel -> **Deploy** (`ci/deploy.sh`).
 Timings, optimizations and cost per deploy: `docs/deploy-pipeline.md` (`scripts/pipeline_timing.sh` measures them).
 A pipeline failure sends an email through the SNS topic `ecg-alerts`.
 
-1. **Authorize GitHub (once, after the apply):** the repos are in different accounts and each connection
-   sees only one account. AWS console -> Developer Tools -> Settings -> Connections:
-   - `ecg-github` (backend, account `tl-gmiler`) -> *Update pending connection* -> install/choose the AWS app
-     on the `tl-gmiler` account;
-   - `ecg-github-frontend` (app, account `trustedlake`) -> the same, signed in to GitHub as `trustedlake`.
-   Until then the pipeline fails at the Source stage.
+1. **Authorize GitHub (once, after the apply):** in us-east-1 Developer Tools -> Settings -> Connections,
+   authorize `ecg-github-frontend` as `trustedlake` for backend, frontend and Lambdas.
+   All production sources use this connection. `ecg-github` is retained for rollback only.
 2. **Trigger by hand:** `aws codepipeline start-pipeline-execution --name ecg-backend`.
 3. **What the deploy does:** starts RDS if it is stopped, registers a new task definition revision
    (from the latest one in the family, so Terraform changes land here), runs `migrate` and
@@ -103,7 +100,7 @@ The old sa-east-1 stack is **stopped, not destroyed**: state in `s3://ecg-lambda
 
 ### Lambdas pipeline (`ecg-lambdas`, us-east-1)
 Code of `ecg-reading` and `ecg-interpretation` is deployed by CodePipeline `ecg-lambdas`, defined in
-`ecg-lambdas-v1/mock_lambdas/infra`. Source is `tl-gmiler/ecg-lambdas-v1` on `main` (connection `ecg-github`); Test and Build
+`ecg-lambdas-v1/lambdas/infra`. Source is `trustedlake/ecg-lambdas-v1` on `main` (connection `ecg-github-frontend`); Test and Build
 run in parallel, then Deploy updates both functions, sets `CODE_VERSION` and runs `smoke_aws.py`. If the smoke test fails
 the previous code is restored. There is no manual approval. Failures reach `ecg-alerts` through the EventBridge rule
 `ecg-lambdas-pipeline-failed`; this stack's SNS topic policy (`monitoring.tf`) allows that rule to publish.

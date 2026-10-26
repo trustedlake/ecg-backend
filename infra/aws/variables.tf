@@ -93,7 +93,7 @@ variable "extra_allowed_hosts" {
 variable "office_hours_enabled" {
   type        = bool
   description = "Turns ECS and RDS on/off on business hours. false = always on (minimum 1 task)."
-  default     = true
+  default     = false
 }
 
 variable "schedule_timezone" {
